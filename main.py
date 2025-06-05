@@ -8,7 +8,6 @@ from io import StringIO
 import sys
 from pymongo import MongoClient
 from datetime import datetime
-from collections import defaultdict
 import re
 
 app = Flask(__name__)
@@ -147,10 +146,14 @@ def index():
                 variation = '='
             variation_list.append(variation)
         df['variación'] = variation_list
-        csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
-        df.to_csv(csv_filename, index=False)
+        # Ordenar columnas para asegurar que 'variación' esté al final
+        cols = [col for col in df.columns if col != 'variación'] + ['variación']
+        df = df[cols]
+        # Realizar el sort si corresponde
         if sort and sort in df.columns:
             df = df.sort_values(by=sort, ascending=(order == 'asc'))
+        csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
+        df.to_csv(csv_filename, index=False)
         return render_template_string('''
             <!DOCTYPE html>
             <html>
@@ -162,7 +165,6 @@ def index():
                 </style>
                 <style>
                     body { font-family: Arial, sans-serif; margin: 20px; }
-                    .logs { background: #f5f5f5; padding: 10px; border-radius: 5px; height: 300px; overflow-y: scroll; }
                     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
                     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
                     th { background-color: #f2f2f2; }
@@ -211,77 +213,134 @@ def index():
                             {% endfor %}
                         </tbody>
                     </table>
-                    <!-- DataTables JS -->
                     <script type="text/javascript" src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
                     <script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.js"></script>
                     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-                    <script>
-                        $(document).ready(function() {
-                            $('#resultsTable').DataTable({
-                                "paging": false,
-                                "info": false,
-                                "language": {
-                                    "search": "Buscar:",
-                                    "zeroRecords": "No se encontraron registros"
-                                }
-                            });
-                        });
-                        let chart = null;
-                        function updateChart(history) {
-                            const labels = history.map(point => point.date);
-                            const data = history.map(point => point.avg_price);
-                            if (!chart) {
-                                chart = new Chart(document.getElementById('priceChart').getContext('2d'), {
-                                    type: 'line',
-                                    data: {
-                                        labels: labels,
-                                        datasets: [{
-                                            label: 'Precio promedio (USD)',
-                                            data: data,
-                                            fill: false,
-                                            borderColor: 'rgb(75, 192, 192)',
-                                            tension: 0.1
-                                        }]
-                                    },
-                                    options: {
-                                        scales: {
-                                            x: { display: true, title: { display: true, text: 'Fecha' }},
-                                            y: { display: true, title: { display: true, text: 'Precio USD'}}
-                                        }
-                                    }
-                                });
-                            } else {
-                                chart.data.labels = labels;
-                                chart.data.datasets[0].data = data;
-                                chart.update();
-                            }
-                        }
-                        $(document).on('click', '.show-history', function() {
-                            const unique_id = $(this).data('uniqueid');
-                            const search_term = $(this).data('searchterm');
-                            fetch('/history', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({unique_id, search_term})
-                            })
-                            .then(response => response.json())
-                            .then(result => {
-                                updateChart(result.history);
-                            });
-                        });
-                    </script>
                 </div>
-                <p><a href="/download/{{ csv_filename }}">Descargar CSV</a></p>
-                <h2>Evolución histórica del precio promedio</h2>
-                <canvas id="priceChart"></canvas>
+                <!-- MODAL OVERLAY PARA EL DIAGRAMA -->
+                <div id="chartModal" class="modal-overlay" style="display:none;">
+                    <div class="modal-content">
+                        <span class="close-btn" id="closeChartModal">&times;</span>
+                        <h2>Evolución histórica del precio promedio</h2>
+                        <canvas id="priceChart" width="600" height="300"></canvas>
+                    </div>
+                </div>
+                <style>
+                .modal-overlay {
+                    position: fixed;
+                    top: 0; left: 0;
+                    width: 100vw; height: 100vh;
+                    background: rgba(34, 34, 34, 0.93);
+                    z-index: 9999;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .modal-content {
+                    background: #23272f;
+                    border-radius: 16px;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+                    padding: 32px 32px 16px 32px;
+                    min-width: 340px;
+                    min-height: 200px;
+                    max-width: 700px;
+                    position: relative;
+                    color: #e0e0e0;
+                    text-align: center;
+                }
+                .close-btn {
+                    position: absolute;
+                    top: 8px;
+                    right: 16px;
+                    font-size: 26px;
+                    color: #aaa;
+                    cursor: pointer;
+                    background: none;
+                    border: none;
+                    z-index: 10000;
+                    transition: color 0.18s;
+                }
+                .close-btn:hover { color: #fff; }
+                </style>
                 <script>
-                    // Los logs de Python se envían desde Flask como variable logs
+                    $(document).ready(function() {
+                        $('#resultsTable').DataTable({
+                            "paging": false,
+                            "info": false,
+                            "language": {
+                                "search": "Buscar:",
+                                "zeroRecords": "No se encontraron registros"
+                            }
+                        });
+                    });
+
+                    let chart = null;
+                    function updateChart(history) {
+                        const labels = history.map(point => point.date);
+                        const data = history.map(point => point.avg_price);
+                        if(chart) { chart.destroy(); }
+                        chart = new Chart(document.getElementById('priceChart').getContext('2d'), {
+                            type: 'line',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Precio promedio (USD)',
+                                    data: data,
+                                    fill: false,
+                                    borderColor: 'rgb(75, 192, 192)',
+                                    tension: 0.1
+                                }]
+                            },
+                            options: {
+                                responsive: false,
+                                maintainAspectRatio: false,
+                                scales: {
+                                    x: { display: true, title: { display: true, text: 'Fecha' }},
+                                    y: { display: true, title: { display: true, text: 'Precio USD'}}
+                                }
+                            }
+                        });
+                    }
+
+                    // Mostrar el overlay y diagrama
+                    $(document).on('click', '.show-history', function() {
+                        const unique_id = $(this).data('uniqueid');
+                        const search_term = $(this).data('searchterm');
+                        fetch('/history', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({unique_id, search_term})
+                        })
+                        .then(response => response.json())
+                        .then(result => {
+                            updateChart(result.history);
+                            $('#chartModal').fadeIn(160);
+                            document.body.style.overflow = 'hidden'; // Bloquea el scroll
+                        });
+                    });
+
+                    // Cerrar overlay
+                    $('#closeChartModal').on('click', function() {
+                        $('#chartModal').fadeOut(120);
+                        document.body.style.overflow = '';
+                    });
+
+                    // También cerrar con ESC
+                    $(document).on('keydown', function(e) {
+                        if (e.key === 'Escape') {
+                            $('#chartModal').fadeOut(120);
+                            document.body.style.overflow = '';
+                        }
+                    });
+
+                    // Mostrar logs de Python solo en consola, no en la página
                     {% if logs %}
                         {% for log in logs %}
                             console.log("[SCRAPER]", `{{ log|e }}`);
                         {% endfor %}
                     {% endif %}
                 </script>
+                <p><a href="/download/{{ csv_filename }}">Descargar CSV</a></p>
             </body>
             </html>
         ''', logs=web_logger.logs, df=df, csv_filename=csv_filename)
@@ -305,48 +364,6 @@ def index():
         margin: 20px;
         background-color: var(--bg-dark);
         color: var(--text-light);
-    }
-    .logs {
-        background: #2a2a2a;
-        color: var(--text-light);
-        padding: 15px;
-        border-radius: 8px;
-        height: 300px;
-        overflow-y: scroll;
-        border: 1px solid var(--table-border);
-    }
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 20px;
-        background-color: #2a2a2a;
-    }
-    th, td {
-        border: 1px solid var(--table-border);
-        padding: 12px;
-        text-align: left;
-    }
-    th {
-        background-color: #333;
-        color: var(--text-light);
-        cursor: pointer;
-    }
-    tr:nth-child(even) {
-        background-color: #2f2f2f;
-    }
-    tr:hover {
-        background-color: #3a3a3a;
-    }
-    a {
-        color: var(--secondary-accent);
-        text-decoration: none;
-    }
-    a:hover {
-        color: var(--primary-accent);
-        text-decoration: underline;
-    }
-    .no-link {
-        color: #888;
     }
     h1, h2, h3 {
         color: var(--primary-accent);
@@ -383,7 +400,6 @@ def history():
         'search_term': search_term
     }))
 
-    # Fallback temporal por debugging: si no encuentra nada, intenta buscar por descripción
     if not docs:
         print(f"[DEBUG] No se encontraron docs por unique_id {unique_id}, search_term {search_term}")
 
@@ -399,7 +415,6 @@ def history():
     ]
     print(f"[DEBUG] Devuelvo history: {history_list}")
     return jsonify({'history': history_list})
-
 
 @app.route('/download/<filename>')
 def download(filename):
