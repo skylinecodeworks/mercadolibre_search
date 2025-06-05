@@ -206,7 +206,9 @@ def index():
                         <thead>
                             <tr>
                                 {% for column in df.columns %}
-                                    <th>{{ column }}</th>
+                                    {% if column != "link" %}
+                                        <th>{{ column }}</th>
+                                    {% endif %}
                                 {% endfor %}
                                 <th>Enlace</th>
                                 <th>Evolución</th>
@@ -224,6 +226,8 @@ def index():
                                                 <span class="no-link">N/A</span>
                                             {% endif %}
                                         </td>
+                                    {% elif col == "link" %}
+                                        <!-- no renderizamos link aquí porque va en la columna 'Enlace' -->
                                     {% else %}
                                         <td>{{ row[col] if row[col] is not none else '' }}</td>
                                     {% endif %}
