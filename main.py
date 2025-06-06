@@ -19,6 +19,8 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 debug = os.getenv("DEBUG", "False").lower() == "true"
+port = os.getenv("PORT", 52021)
+
 
 class WebLogger:
     def __init__(self):
@@ -275,9 +277,6 @@ def index():
                         </tbody>
                     </table>
                 </div>
-                <div class="mt-3">
-                    <a href="/download/{{ csv_filename }}" class="btn btn-link">Descargar CSV</a>
-                </div>
             </div>
         </div>
 
@@ -424,4 +423,4 @@ def download(filename):
     return send_file(filename, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=52021, debug=debug, use_reloader=False)
+    app.run(host='0.0.0.0', debug=debug, use_reloader=False)
