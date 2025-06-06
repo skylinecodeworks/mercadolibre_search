@@ -9,11 +9,16 @@ import sys
 from pymongo import MongoClient
 from datetime import datetime
 import re
+import os
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
 
 app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+debug = os.getenv("DEBUG", "False").lower() == "true"
 
 class WebLogger:
     def __init__(self):
@@ -27,9 +32,10 @@ class WebLogger:
 web_logger = WebLogger()
 sys.stdout = web_logger
 
-mongo_client = MongoClient("mongodb://localhost:27017/")
-mongo_db = mongo_client["ml"]
-cars_collection = mongo_db["cars"]
+mongo_client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
+
+mongo_db = mongo_client[os.getenv("MONGO_DB", "ml")]
+cars_collection = mongo_db[os.getenv("MONGO_COLLECTION", "cars")]
 
 def extract_unique_id(url):
     match = re.search(r"MLA-(\d+)", url or "")
@@ -418,4 +424,4 @@ def download(filename):
     return send_file(filename, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=52021, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=52021, debug=debug, use_reloader=False)
