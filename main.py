@@ -173,8 +173,8 @@ def index():
         df = df[cols]
         if sort and sort in df.columns:
             df = df.sort_values(by=sort, ascending=(order == 'asc'))
-        csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
-        df.to_csv(csv_filename, index=False)
+        #csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
+        #df.to_csv(csv_filename, index=False)
         return render_template_string('''
         <!DOCTYPE html>
         <html lang="es">
@@ -354,7 +354,7 @@ def index():
         </script>
         </body>
         </html>
-        ''', logs=web_logger.logs, df=df, csv_filename=csv_filename, search_terms=search_terms, search_term=search_term)
+        ''', logs=web_logger.logs, df=df, search_terms=search_terms, search_term=search_term)
 
     # GET (página inicial)
     return render_template_string('''
