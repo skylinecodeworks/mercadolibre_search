@@ -35,7 +35,6 @@ mongo_db = mongo_client["ml"]
 cars_collection = mongo_db["cars"]
 
 def extract_unique_id(url):
-    # Busca el identificador entre 'MLA-' y el siguiente guion bajo o caracter que cierra el ID
     match = re.search(r"MLA-(\d+)", url or "")
     return match.group(1) if match else None
 
@@ -44,7 +43,6 @@ def scrape_mercado_libre(search_term):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     all_items = []
     page = 1
-    # Sin límite de páginas
     while True:
         url = f"{base_url}{search_term.replace(' ', '-')}_Desde_{(page - 1) * 48 + 1}"
         print(f"Scraping page {page}: {url}")
@@ -69,6 +67,8 @@ def scrape_mercado_libre(search_term):
                     title = title_elem.text.strip() if title_elem and title_elem.text else 'No title'
                     link = title_elem.get('href', '#') if title_elem else '#'
                     unique_id = extract_unique_id(link)
+                    if not unique_id:
+                        continue  # Skip products without a valid ID
                     print(f"Link: {link}")
                     price_elem = item.find('span', class_='andes-money-amount__fraction')
                     price = f"US${price_elem.text.strip()}" if price_elem and price_elem.text else 'N/A'
@@ -111,7 +111,7 @@ def scrape_mercado_libre(search_term):
         for rec in records:
             rec['timestamp'] = timestamp
             rec['search_term'] = search_term
-            rec['date_str'] = today_str  # campo auxiliar para control diario
+            rec['date_str'] = today_str
             filter_query = {
                 'unique_id': rec['unique_id'],
                 'search_term': search_term,
@@ -149,7 +149,6 @@ def index():
         df['variación'] = variation_list
         csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
         df.to_csv(csv_filename, index=False)
-        history_points = []
         if sort and sort in df.columns:
             df = df.sort_values(by=sort, ascending=(order == 'asc'))
         return render_template_string('''
@@ -175,12 +174,6 @@ def index():
                     <input type="text" name="search_term" placeholder="Enter search term" required>
                     <button type="submit">Scrape</button>
                 </form>
-                <h2>Logs</h2>
-                <div class="logs">
-                    {% for log in logs %}
-                        <div>{{ log }}</div>
-                    {% endfor %}
-                </div>
                 <h2>Resultados ({{ df|length }} ítems)</h2>
                 <p>Columnas: {{ df.columns.tolist() }}</p>
                 <div class="table-container">
@@ -209,7 +202,6 @@ def index():
                                 </td>
                                 <td>
                                     <button class="show-history"
-                                        data-description="{{ row.description }}"
                                         data-uniqueid="{{ row.unique_id }}"
                                         data-searchterm="{{ row.search_term }}">
                                         Ver evolución
@@ -282,6 +274,14 @@ def index():
                 <p><a href="/download/{{ csv_filename }}">Descargar CSV</a></p>
                 <h2>Evolución histórica del precio promedio</h2>
                 <canvas id="priceChart"></canvas>
+                <script>
+                    // Los logs de Python se envían desde Flask como variable logs
+                    {% if logs %}
+                        {% for log in logs %}
+                            console.log("[SCRAPER]", `{{ log|e }}`);
+                        {% endfor %}
+                    {% endif %}
+                </script>
             </body>
             </html>
         ''', logs=web_logger.logs, df=df, csv_filename=csv_filename)
@@ -359,12 +359,14 @@ def index():
                 <input type="text" name="search_term" placeholder="Enter search term" required>
                 <button type="submit">Scrape</button>
             </form>
-            <h2>Logs</h2>
-            <div class="logs">
-                {% for log in logs %}
-                    <div>{{ log }}</div>
-                {% endfor %}
-            </div>
+            <script>
+                // Los logs de Python se envían desde Flask como variable logs
+                {% if logs %}
+                    {% for log in logs %}
+                        console.log("[SCRAPER]", `{{ log|e }}`);
+                    {% endfor %}
+                {% endif %}
+            </script>
         </body>
         </html>
     ''', logs=web_logger.logs)
@@ -372,12 +374,19 @@ def index():
 @app.route('/history', methods=['POST'])
 def history():
     data = request.json
-    unique_id = data.get('unique_id')
+    unique_id = str(data.get('unique_id')).strip()
     search_term = data['search_term']
-    docs = cars_collection.find({
+
+    # Busca solo por unique_id y search_term
+    docs = list(cars_collection.find({
         'unique_id': unique_id,
         'search_term': search_term
-    })
+    }))
+
+    # Fallback temporal por debugging: si no encuentra nada, intenta buscar por descripción
+    if not docs:
+        print(f"[DEBUG] No se encontraron docs por unique_id {unique_id}, search_term {search_term}")
+
     history_points = {}
     for doc in docs:
         date = doc['timestamp'].strftime('%Y-%m-%d') if hasattr(doc['timestamp'], 'strftime') else str(doc['timestamp'])
@@ -388,7 +397,9 @@ def history():
         {'date': date, 'avg_price': sum(prices) // len(prices)}
         for date, prices in sorted(history_points.items())
     ]
+    print(f"[DEBUG] Devuelvo history: {history_list}")
     return jsonify({'history': history_list})
+
 
 @app.route('/download/<filename>')
 def download(filename):
