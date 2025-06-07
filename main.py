@@ -12,7 +12,6 @@ import re
 
 app = Flask(__name__)
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,6 @@ class WebLogger:
 web_logger = WebLogger()
 sys.stdout = web_logger
 
-# MongoDB connection (no auth)
 mongo_client = MongoClient("mongodb://localhost:27017/")
 mongo_db = mongo_client["ml"]
 cars_collection = mongo_db["cars"]
@@ -36,6 +34,20 @@ cars_collection = mongo_db["cars"]
 def extract_unique_id(url):
     match = re.search(r"MLA-(\d+)", url or "")
     return match.group(1) if match else None
+
+def extract_picture_url(item):
+    # Busca el primer <img class="poly-component__picture">
+    img = item.find('img', class_='poly-component__picture')
+    if not img:
+        return ""
+    src = img.get('src', "")
+    # Si src es placeholder GIF o vacío, usa data-src o data-original
+    if not src or src.startswith("data:image"):
+        # Algunos sitios usan data-src, otros data-original
+        src = img.get('data-src') or img.get('data-original') or ""
+    return src
+
+
 
 def scrape_mercado_libre(search_term):
     base_url = "https://listado.mercadolibre.com.ar/"
@@ -67,8 +79,8 @@ def scrape_mercado_libre(search_term):
                     link = title_elem.get('href', '#') if title_elem else '#'
                     unique_id = extract_unique_id(link)
                     if not unique_id:
-                        continue  # Skip products without a valid ID
-                    print(f"Link: {link}")
+                        continue
+                    picture_url = extract_picture_url(item)
                     price_elem = item.find('span', class_='andes-money-amount__fraction')
                     price = f"US${price_elem.text.strip()}" if price_elem and price_elem.text else 'N/A'
                     details = item.find_all('li', class_='poly-attributes_list__item')
@@ -81,6 +93,7 @@ def scrape_mercado_libre(search_term):
                     km_num = int(km.replace('Km', '').replace('.', '').strip()) if km != 'N/A' else 0
                     all_items.append({
                         'unique_id': unique_id,
+                        'image': picture_url,
                         'description': title,
                         'price': price,
                         'price_num': price_num,
@@ -102,7 +115,6 @@ def scrape_mercado_libre(search_term):
             print(f"Error scraping page {page}: {e}")
             break
     df = pd.DataFrame(all_items)
-    # Guardar resultados en MongoDB con timestamp, término de búsqueda y control por día
     if not df.empty:
         records = df.to_dict(orient='records')
         timestamp = datetime.utcnow()
@@ -123,8 +135,10 @@ def scrape_mercado_libre(search_term):
 def index():
     sort = request.args.get('sort', '')
     order = request.args.get('order', 'asc')
+    search_terms = sorted(set(doc['search_term'] for doc in cars_collection.find({}, {'search_term': 1})))
+    search_term = ""
     if request.method == 'POST':
-        search_term = request.form['search_term']
+        search_term = request.form.get('search_term') or request.form.get('dropdown_search_term') or ""
         web_logger.logs = []  # Clear previous logs
         df = scrape_mercado_libre(search_term)
         variation_list = []
@@ -146,10 +160,11 @@ def index():
                 variation = '='
             variation_list.append(variation)
         df['variación'] = variation_list
-        # Ordenar columnas para asegurar que 'variación' esté al final
-        cols = [col for col in df.columns if col != 'variación'] + ['variación']
+        if 'image' not in df.columns:
+            df['image'] = ""
+        # Orden de columnas
+        cols = ['image'] + [col for col in df.columns if col not in ['image', 'variación']] + ['variación']
         df = df[cols]
-        # Realizar el sort si corresponde
         if sort and sort in df.columns:
             df = df.sort_values(by=sort, ascending=(order == 'asc'))
         csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
@@ -162,28 +177,36 @@ def index():
                 <style>
                     th a { text-decoration: none; color: inherit; }
                     th a:hover { text-decoration: underline; }
-                </style>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                    th { background-color: #f2f2f2; }
+                    td img.product-thumb { width:100px; height:100px; object-fit:cover; border-radius:8px;}
                 </style>
             </head>
             <body>
                 <h1>Mercado Libre Scraper</h1>
-                <form method="POST">
-                    <input type="text" name="search_term" placeholder="Enter search term" required>
+                <form method="POST" id="searchForm">
+                    <input type="text" name="search_term" id="searchInput" placeholder="Enter search term">
+                    <select name="dropdown_search_term" id="dropdown_search_term" onchange="onDropdownChange(this)">
+                        <option value="">-- Seleccione búsqueda anterior --</option>
+                        {% for term in search_terms %}
+                            <option value="{{ term }}" {% if term == search_term %}selected{% endif %}>{{ term }}</option>
+                        {% endfor %}
+                    </select>
                     <button type="submit">Scrape</button>
                 </form>
+                <script>
+                function onDropdownChange(sel) {
+                    if(sel.value) {
+                        document.getElementById('searchInput').value = '';
+                        document.getElementById('searchForm').submit();
+                    }
+                }
+                </script>
                 <h2>Resultados ({{ df|length }} ítems)</h2>
-                <p>Columnas: {{ df.columns.tolist() }}</p>
                 <div class="table-container">
                     <table id="resultsTable" class="display">
                         <thead>
                             <tr>
                                 {% for column in df.columns %}
-                                <th>{{ column }}</th>
+                                    <th>{{ column }}</th>
                                 {% endfor %}
                                 <th>Enlace</th>
                                 <th>Evolución</th>
@@ -192,8 +215,18 @@ def index():
                         <tbody>
                             {% for _, row in df.iterrows() %}
                             <tr>
-                                {% for value in row %}
-                                <td>{{ value if value is not none else '' }}</td>
+                                {% for col in df.columns %}
+                                    {% if col == "image" %}
+                                        <td>
+                                            {% if row.image %}
+                                                <img src="{{ row.image }}" class="product-thumb" loading="lazy">
+                                            {% else %}
+                                                <span class="no-link">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                    {% else %}
+                                        <td>{{ row[col] if row[col] is not none else '' }}</td>
+                                    {% endif %}
                                 {% endfor %}
                                 <td>
                                     {% if 'link' in row %}
@@ -217,7 +250,7 @@ def index():
                     <script type="text/javascript" src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.js"></script>
                     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
                 </div>
-                <!-- MODAL OVERLAY PARA EL DIAGRAMA -->
+                <!-- Modal overlay para el diagrama -->
                 <div id="chartModal" class="modal-overlay" style="display:none;">
                     <div class="modal-content">
                         <span class="close-btn" id="closeChartModal">&times;</span>
@@ -226,40 +259,9 @@ def index():
                     </div>
                 </div>
                 <style>
-                .modal-overlay {
-                    position: fixed;
-                    top: 0; left: 0;
-                    width: 100vw; height: 100vh;
-                    background: rgba(34, 34, 34, 0.93);
-                    z-index: 9999;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }
-                .modal-content {
-                    background: #23272f;
-                    border-radius: 16px;
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-                    padding: 32px 32px 16px 32px;
-                    min-width: 340px;
-                    min-height: 200px;
-                    max-width: 700px;
-                    position: relative;
-                    color: #e0e0e0;
-                    text-align: center;
-                }
-                .close-btn {
-                    position: absolute;
-                    top: 8px;
-                    right: 16px;
-                    font-size: 26px;
-                    color: #aaa;
-                    cursor: pointer;
-                    background: none;
-                    border: none;
-                    z-index: 10000;
-                    transition: color 0.18s;
-                }
+                .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(34, 34, 34, 0.93); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+                .modal-content { background: #23272f; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); padding: 32px 32px 16px 32px; min-width: 340px; min-height: 200px; max-width: 700px; position: relative; color: #e0e0e0; text-align: center; }
+                .close-btn { position: absolute; top: 8px; right: 16px; font-size: 26px; color: #aaa; cursor: pointer; background: none; border: none; z-index: 10000; transition: color 0.18s; }
                 .close-btn:hover { color: #fff; }
                 </style>
                 <script>
@@ -267,10 +269,7 @@ def index():
                         $('#resultsTable').DataTable({
                             "paging": false,
                             "info": false,
-                            "language": {
-                                "search": "Buscar:",
-                                "zeroRecords": "No se encontraron registros"
-                            }
+                            "language": { "search": "Buscar:", "zeroRecords": "No se encontraron registros" }
                         });
                     });
 
@@ -281,28 +280,10 @@ def index():
                         if(chart) { chart.destroy(); }
                         chart = new Chart(document.getElementById('priceChart').getContext('2d'), {
                             type: 'line',
-                            data: {
-                                labels: labels,
-                                datasets: [{
-                                    label: 'Precio promedio (USD)',
-                                    data: data,
-                                    fill: false,
-                                    borderColor: 'rgb(75, 192, 192)',
-                                    tension: 0.1
-                                }]
-                            },
-                            options: {
-                                responsive: false,
-                                maintainAspectRatio: false,
-                                scales: {
-                                    x: { display: true, title: { display: true, text: 'Fecha' }},
-                                    y: { display: true, title: { display: true, text: 'Precio USD'}}
-                                }
-                            }
+                            data: { labels: labels, datasets: [{ label: 'Precio promedio (USD)', data: data, fill: false, borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] },
+                            options: { responsive: false, maintainAspectRatio: false, scales: { x: { display: true, title: { display: true, text: 'Fecha' }}, y: { display: true, title: { display: true, text: 'Precio USD'}}}}
                         });
                     }
-
-                    // Mostrar el overlay y diagrama
                     $(document).on('click', '.show-history', function() {
                         const unique_id = $(this).data('uniqueid');
                         const search_term = $(this).data('searchterm');
@@ -315,25 +296,19 @@ def index():
                         .then(result => {
                             updateChart(result.history);
                             $('#chartModal').fadeIn(160);
-                            document.body.style.overflow = 'hidden'; // Bloquea el scroll
+                            document.body.style.overflow = 'hidden';
                         });
                     });
-
-                    // Cerrar overlay
                     $('#closeChartModal').on('click', function() {
                         $('#chartModal').fadeOut(120);
                         document.body.style.overflow = '';
                     });
-
-                    // También cerrar con ESC
                     $(document).on('keydown', function(e) {
                         if (e.key === 'Escape') {
                             $('#chartModal').fadeOut(120);
                             document.body.style.overflow = '';
                         }
                     });
-
-                    // Mostrar logs de Python solo en consola, no en la página
                     {% if logs %}
                         {% for log in logs %}
                             console.log("[SCRAPER]", `{{ log|e }}`);
@@ -343,7 +318,9 @@ def index():
                 <p><a href="/download/{{ csv_filename }}">Descargar CSV</a></p>
             </body>
             </html>
-        ''', logs=web_logger.logs, df=df, csv_filename=csv_filename)
+        ''', logs=web_logger.logs, df=df, csv_filename=csv_filename, search_terms=search_terms, search_term=search_term)
+
+    # GET (página inicial)
     return render_template_string('''
         <!DOCTYPE html>
         <html>
@@ -352,32 +329,32 @@ def index():
             <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/jquery.dataTables.min.css">
             <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/buttons/2.2.2/css/buttons.dataTables.min.css">
 <style>
-    :root {
-        --bg-dark: #1a1a1a;
-        --text-light: #e0e0e0;
-        --primary-accent: #4a6fa5;
-        --secondary-accent: #6d8bc7;
-        --table-border: #3a3a3a;
-    }
-    body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        margin: 20px;
-        background-color: var(--bg-dark);
-        color: var(--text-light);
-    }
-    h1, h2, h3 {
-        color: var(--primary-accent);
-    }
+    :root { --bg-dark: #1a1a1a; --text-light: #e0e0e0; --primary-accent: #4a6fa5; --secondary-accent: #6d8bc7; --table-border: #3a3a3a; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: var(--bg-dark); color: var(--text-light); }
+    h1, h2, h3 { color: var(--primary-accent); }
 </style>
         </head>
         <body>
             <h1>Mercado Libre Scraper</h1>
-            <form method="POST">
-                <input type="text" name="search_term" placeholder="Enter search term" required>
+            <form method="POST" id="searchForm">
+                <input type="text" name="search_term" id="searchInput" placeholder="Enter search term">
+                <select name="dropdown_search_term" id="dropdown_search_term" onchange="onDropdownChange(this)">
+                    <option value="">-- Seleccione búsqueda anterior --</option>
+                    {% for term in search_terms %}
+                        <option value="{{ term }}">{{ term }}</option>
+                    {% endfor %}
+                </select>
                 <button type="submit">Scrape</button>
             </form>
             <script>
-                // Los logs de Python se envían desde Flask como variable logs
+            function onDropdownChange(sel) {
+                if(sel.value) {
+                    document.getElementById('searchInput').value = '';
+                    document.getElementById('searchForm').submit();
+                }
+            }
+            </script>
+            <script>
                 {% if logs %}
                     {% for log in logs %}
                         console.log("[SCRAPER]", `{{ log|e }}`);
@@ -386,34 +363,24 @@ def index():
             </script>
         </body>
         </html>
-    ''', logs=web_logger.logs)
+    ''', logs=web_logger.logs, search_terms=search_terms)
 
 @app.route('/history', methods=['POST'])
 def history():
     data = request.json
     unique_id = str(data.get('unique_id')).strip()
     search_term = data['search_term']
-
-    # Busca solo por unique_id y search_term
     docs = list(cars_collection.find({
         'unique_id': unique_id,
         'search_term': search_term
     }))
-
-    if not docs:
-        print(f"[DEBUG] No se encontraron docs por unique_id {unique_id}, search_term {search_term}")
-
     history_points = {}
     for doc in docs:
         date = doc['timestamp'].strftime('%Y-%m-%d') if hasattr(doc['timestamp'], 'strftime') else str(doc['timestamp'])
         price = doc.get('price_num', 0)
         if price:
             history_points.setdefault(date, []).append(price)
-    history_list = [
-        {'date': date, 'avg_price': sum(prices) // len(prices)}
-        for date, prices in sorted(history_points.items())
-    ]
-    print(f"[DEBUG] Devuelvo history: {history_list}")
+    history_list = [{'date': date, 'avg_price': sum(prices)//len(prices)} for date, prices in sorted(history_points.items())]
     return jsonify({'history': history_list})
 
 @app.route('/download/<filename>')
