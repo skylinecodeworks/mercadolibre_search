@@ -11,6 +11,7 @@ from datetime import datetime
 import re
 import os
 from dotenv import load_dotenv
+import seed_data
 
 load_dotenv(override=False)
 
@@ -278,6 +279,11 @@ def index():
                     </table>
                 </div>
             </div>
+
+            <footer class="mt-5 mb-4 text-center text-secondary">
+                <small>Mercado Libre Scraper &copy; 2025</small><br>
+                <a href="/admin/recreate_db" class="text-muted text-decoration-none" style="font-size: 0.8em;">Administrar Base de Datos</a>
+            </footer>
         </div>
 
         <!-- Modal Bootstrap para gráfico -->
@@ -381,6 +387,11 @@ def index():
                 </select>
                 <button type="submit">Scrape</button>
             </form>
+
+            <div style="margin-top: 50px; text-align: center; font-size: 0.8em;">
+                <a href="/admin/recreate_db" style="color: #666; text-decoration: none;">Administrar Base de Datos</a>
+            </div>
+
             <script>
             function onDropdownChange(sel) {
                 if(sel.value) {
@@ -421,6 +432,67 @@ def history():
 @app.route('/download/<filename>')
 def download(filename):
     return send_file(filename, as_attachment=True)
+
+@app.route('/admin/recreate_db', methods=['GET', 'POST'])
+def recreate_db():
+    if request.method == 'POST':
+        try:
+            count = seed_data.recreate_database(cars_collection)
+            message = f"Base de datos recreada exitosamente con {count} registros de ejemplo."
+            alert_type = "success"
+        except Exception as e:
+            message = f"Error al recrear la base de datos: {str(e)}"
+            alert_type = "danger"
+
+        return render_template_string('''
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <title>Recrear Base de Datos</title>
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+            <style>body { background: #f6f7fa; display: flex; align-items: center; justify-content: center; height: 100vh; }</style>
+        </head>
+        <body>
+            <div class="card shadow p-4" style="max-width: 500px; width: 100%;">
+                <div class="text-center mb-4">
+                    <h2 class="h4">Administración DB</h2>
+                </div>
+                <div class="alert alert-{{ alert_type }}" role="alert">
+                    {{ message }}
+                </div>
+                <div class="d-grid gap-2">
+                    <a href="/" class="btn btn-primary">Volver al Inicio</a>
+                    <a href="/admin/recreate_db" class="btn btn-outline-secondary">Volver a Admin</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        ''', message=message, alert_type=alert_type)
+
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <title>Recrear Base de Datos</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>body { background: #f6f7fa; display: flex; align-items: center; justify-content: center; height: 100vh; }</style>
+    </head>
+    <body>
+        <div class="card shadow p-4" style="max-width: 500px; width: 100%;">
+            <div class="text-center mb-4">
+                <h2 class="h4 text-danger">⚠️ Zona de Peligro</h2>
+                <p class="text-muted">Esta acción borrará todos los datos actuales y restaurará los datos de ejemplo.</p>
+            </div>
+            <form method="POST">
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-danger fw-bold">Recrear Base de Datos</button>
+                    <a href="/" class="btn btn-outline-secondary">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </body>
+    </html>
+    ''')
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=False)

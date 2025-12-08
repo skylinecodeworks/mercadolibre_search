@@ -1,7 +1,14 @@
 [project]
 name = "mercadolibre-search"
 version = "0.1.0"
-description = "Add your description here"
+description = "Scraper web en Python + Flask para consultar autos publicados en Mercado Libre Argentina"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "flask",
+    "requests",
+    "beautifulsoup4",
+    "pandas",
+    "pymongo",
+    "python-dotenv",
+]
