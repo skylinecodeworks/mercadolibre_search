@@ -34,7 +34,17 @@ class WebLogger:
 web_logger = WebLogger()
 sys.stdout = web_logger
 
-mongo_client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
+mongo_user = os.getenv("MONGO_USER")
+mongo_password = os.getenv("MONGO_PASSWORD")
+mongo_host = os.getenv("MONGO_HOST", "localhost")
+mongo_port = os.getenv("MONGO_PORT", "27017")
+
+if mongo_user and mongo_password:
+    mongo_uri = f"mongodb://{mongo_user}:{mongo_password}@{mongo_host}:{mongo_port}/"
+else:
+    mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
+
+mongo_client = MongoClient(os.getenv("MONGO_URI", mongo_uri))
 
 mongo_db = mongo_client[os.getenv("MONGO_DB", "ml")]
 cars_collection = mongo_db[os.getenv("MONGO_COLLECTION", "cars")]
