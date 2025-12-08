@@ -10,9 +10,10 @@ from pymongo import MongoClient
 from datetime import datetime
 import re
 import os
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
-load_dotenv(override=False)
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 app = Flask(__name__)
 
@@ -38,15 +39,16 @@ mongo_user = os.getenv("MONGO_USER")
 mongo_password = os.getenv("MONGO_PASSWORD")
 mongo_host = os.getenv("MONGO_HOST", "localhost")
 mongo_port = os.getenv("MONGO_PORT", "27017")
+mongo_db_name = os.getenv("MONGO_DB", "ml")
 
 if mongo_user and mongo_password:
-    mongo_uri = f"mongodb://{mongo_user}:{mongo_password}@{mongo_host}:{mongo_port}/"
+    mongo_uri = f"mongodb://{quote_plus(mongo_user)}:{quote_plus(mongo_password)}@{mongo_host}:{mongo_port}/{mongo_db_name}"
 else:
     mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
 
 mongo_client = MongoClient(os.getenv("MONGO_URI", mongo_uri))
 
-mongo_db = mongo_client[os.getenv("MONGO_DB", "ml")]
+mongo_db = mongo_client[mongo_db_name]
 cars_collection = mongo_db[os.getenv("MONGO_COLLECTION", "cars")]
 
 def extract_unique_id(url):
