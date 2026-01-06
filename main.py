@@ -49,21 +49,45 @@ else:
 
 final_mongo_uri = os.getenv("MONGO_URI", mongo_uri)
 
-# Log the URI with masked password for debugging using logger to bypass WebLogger capture
-masked_uri = re.sub(r':([^@]+)@', ':****@', final_mongo_uri)
-logger.info(f"Connecting to MongoDB: {masked_uri}")
+def diagnose_mongo_connection(uri):
+    """
+    Diagnoses MongoDB connection issues by attempting a ping and logging details.
+    """
+    masked_uri_log = re.sub(r':([^@]+)@', ':****@', uri)
+    logger.info(f"Diagnostic: Attempting connection to: {masked_uri_log}")
 
-if os.getenv("MONGO_URI"):
-    logger.info("Using MONGO_URI from environment.")
-else:
-    if mongo_user:
-        logger.info(f"Detected MONGO_USER: {mongo_user}")
-        if not mongo_password:
-            logger.warning("MONGO_USER is set but MONGO_PASSWORD is missing! Connection might fail.")
-    else:
-        logger.info("No MONGO_USER set. Connecting without authentication (unless in MONGO_URI).")
+    # Check what variables are present (keys only for security)
+    env_vars = {
+        key: bool(os.getenv(key))
+        for key in ["MONGO_URI", "MONGO_USER", "MONGO_PASSWORD", "MONGO_HOST", "MONGO_PORT", "MONGO_DB", "MONGO_AUTH_SOURCE"]
+    }
+    logger.info(f"Diagnostic: Environment Variables Presence: {env_vars}")
 
-mongo_client = MongoClient(final_mongo_uri)
+    client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+    try:
+        # Try a simple administrative command to verify connectivity and auth
+        info = client.server_info()
+        logger.info("Diagnostic: Connection Successful. Server Info available.")
+        logger.debug(f"Server Info: {info}")
+        return client
+    except Exception as e:
+        logger.error("Diagnostic: Connection FAILED.")
+        logger.error(f"Error Type: {type(e).__name__}")
+        logger.error(f"Error Details: {e}")
+        # Log authentication specific details if possible
+        if "Authentication failed" in str(e) or "requires authentication" in str(e):
+             logger.error("Diagnostic: This is an AUTHENTICATION error. Check username, password, and authSource.")
+             if not os.getenv("MONGO_AUTH_SOURCE"):
+                 logger.error("Diagnostic: MONGO_AUTH_SOURCE is not set. Defaulting to 'admin'. Try setting it to your database name.")
+        raise e
+
+# Perform diagnosis
+try:
+    mongo_client = diagnose_mongo_connection(final_mongo_uri)
+except Exception as e:
+    logger.critical("Failed to connect to MongoDB during startup diagnostics. Application might crash on first request.")
+    # We allow the app to continue so the logs are flushed/visible, but the client might be in a bad state.
+    mongo_client = MongoClient(final_mongo_uri)
 
 mongo_db = mongo_client[mongo_db_name]
 cars_collection = mongo_db[os.getenv("MONGO_COLLECTION", "cars")]
