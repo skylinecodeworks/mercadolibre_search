@@ -381,6 +381,59 @@ def index():
                 </div>
             </div>
 
+            <!-- Filter Card -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-light py-2">
+                    <h5 class="mb-0 h6 fw-bold text-primary">Filtros de resultados</h5>
+                </div>
+                <div class="card-body py-2">
+                    <div class="row g-2">
+                        <!-- Price Filter -->
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold text-secondary mb-1">Precio (Normalizado)</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" id="minPrice" class="form-control" placeholder="Min">
+                                <span class="input-group-text px-1">-</span>
+                                <input type="number" id="maxPrice" class="form-control" placeholder="Max">
+                            </div>
+                        </div>
+                        <!-- Year Filter -->
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary mb-1">Año</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" id="minYear" class="form-control" placeholder="Min">
+                                <span class="input-group-text px-1">-</span>
+                                <input type="number" id="maxYear" class="form-control" placeholder="Max">
+                            </div>
+                        </div>
+                        <!-- Km Filter -->
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold text-secondary mb-1">Kilómetros</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" id="minKm" class="form-control" placeholder="Min">
+                                <span class="input-group-text px-1">-</span>
+                                <input type="number" id="maxKm" class="form-control" placeholder="Max">
+                            </div>
+                        </div>
+                        <!-- Location Filter -->
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary mb-1">Ubicación</label>
+                            <input type="text" id="locationFilter" class="form-control form-control-sm" placeholder="Buscar...">
+                        </div>
+                        <!-- Evolution Filter -->
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary mb-1">Evolución</label>
+                            <select id="evolutionFilter" class="form-select form-select-sm">
+                                <option value="">Todos</option>
+                                <option value="↑">Ascendente (↑)</option>
+                                <option value="↓">Descendente (↓)</option>
+                                <option value="=">Igual (=)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="bg-white rounded p-3 shadow-sm mb-4">
                 <h2 class="mb-3 h4">Resultados <span class="text-secondary small">({{ df|length }} ítems)</span></h2>
                 <div class="table-responsive">
@@ -400,7 +453,7 @@ def index():
                         </thead>
                         <tbody>
                             {% for _, row in df.iterrows() %}
-                            <tr>
+                            <tr data-evolution="{{ row.variación }}">
                                 <td>
                                     {% if row.image %}
                                         <img src="{{ row.image }}" class="product-thumb" loading="lazy">
@@ -424,10 +477,11 @@ def index():
                                     {% endif %}
                                 </td>
                                 <td>
+                                    <span class="badge bg-light text-dark border me-1">{{ row.variación }}</span>
                                     <button type="button" class="btn btn-outline-secondary btn-sm evol-btn show-history"
                                             data-uniqueid="{{ row.unique_id }}"
                                             data-searchterm="{{ row.search_term }}">
-                                        Ver evolución
+                                        Ver
                                     </button>
                                 </td>
                             </tr>
@@ -479,10 +533,75 @@ def index():
             }
         }
         $(document).ready(function() {
+            // Custom filtering function which will search data in column four between two values
+            $.fn.dataTable.ext.search.push(
+                function(settings, data, dataIndex, rowData, counter) {
+                    // Normalize inputs
+                    var minPrice = parseFloat($('#minPrice').val()) || 0;
+                    var maxPrice = parseFloat($('#maxPrice').val()) || Infinity;
+                    if ($('#maxPrice').val() === "") maxPrice = Infinity;
+
+                    var minYear = parseInt($('#minYear').val()) || 0;
+                    var maxYear = parseInt($('#maxYear').val()) || Infinity;
+                    if ($('#maxYear').val() === "") maxYear = Infinity;
+
+                    var minKm = parseInt($('#minKm').val()) || 0;
+                    var maxKm = parseInt($('#maxKm').val()) || Infinity;
+                    if ($('#maxKm').val() === "") maxKm = Infinity;
+
+                    var locationTerm = $('#locationFilter').val().toLowerCase();
+                    var evolutionTerm = $('#evolutionFilter').val();
+
+                    // Get row data (using data-order attributes where available via DataTables API usually, but here 'data' array contains rendered text)
+                    // However, we want the raw numeric values for range filtering.
+
+                    var api = new $.fn.dataTable.Api(settings);
+                    var rowNode = api.row(dataIndex).node();
+                    var evolution = $(rowNode).data('evolution') || "";
+
+                    // Filter by Evolution
+                    if (evolutionTerm && evolution !== evolutionTerm) {
+                        return false;
+                    }
+
+                    // Filter by Location (simple text match)
+                    var location = data[6].toLowerCase();
+                    if (locationTerm && !location.includes(locationTerm)) {
+                        return false;
+                    }
+
+                    // Numeric Filters
+                    // Column 2: Price (normalized in data-order)
+                    var priceVal = parseFloat(api.cell(dataIndex, 2).render('sort')) || 0;
+                    if (priceVal < minPrice || priceVal > maxPrice) {
+                        return false;
+                    }
+
+                    // Column 4: Year
+                    var yearVal = parseFloat(api.cell(dataIndex, 4).render('sort')) || 0;
+                    if (yearVal < minYear || yearVal > maxYear) {
+                        return false;
+                    }
+
+                    // Column 5: Km
+                    var kmVal = parseFloat(api.cell(dataIndex, 5).render('sort')) || 0;
+                    if (kmVal < minKm || kmVal > maxKm) {
+                        return false;
+                    }
+
+                    return true;
+                }
+            );
+
             var table = $('#resultsTable').DataTable({
                 paging: false,
                 info: false,
                 language: {search: "Buscar:", zeroRecords: "No se encontraron registros"}
+            });
+
+            // Event listeners for inputs to redraw table
+            $('#minPrice, #maxPrice, #minYear, #maxYear, #minKm, #maxKm, #locationFilter, #evolutionFilter').on('keyup change', function() {
+                table.draw();
             });
 
             $('#currencyFilter').on('change', function() {
