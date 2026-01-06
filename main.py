@@ -276,6 +276,21 @@ def index():
 
         if action == 'history':
             df = get_historical_data(search_term)
+        elif action == 'scrape_all':
+            all_dfs = []
+            for term in search_terms:
+                web_logger.write(f"Iniciando scrape masivo para: {term}")
+                try:
+                    d = scrape_mercado_libre(term)
+                    if not d.empty:
+                        all_dfs.append(d)
+                except Exception as e:
+                    web_logger.write(f"Error scraping {term}: {e}")
+            if all_dfs:
+                df = pd.concat(all_dfs, ignore_index=True)
+            else:
+                df = pd.DataFrame()
+            search_term = "Todos (Batch)"
         else:
             df = scrape_mercado_libre(search_term)
 
@@ -410,6 +425,7 @@ def index():
                         </div>
                         <div class="col-md-2 d-grid gap-2">
                             <button type="submit" name="action" value="scrape" class="btn btn-success fw-semibold">Scrapear</button>
+                            <button type="submit" name="action" value="scrape_all" class="btn btn-warning fw-semibold">Scrapear Todos</button>
                             <button type="submit" name="action" value="history" class="btn btn-secondary fw-semibold">Ver Histórico</button>
                         </div>
                     </form>
@@ -718,6 +734,7 @@ def index():
                     <option value="ARS">ARS</option>
                 </select>
                 <button type="submit" name="action" value="scrape">Scrape</button>
+                <button type="submit" name="action" value="scrape_all">Scrapear Todos</button>
                 <button type="submit" name="action" value="history">Ver Histórico</button>
             </form>
             <script>
