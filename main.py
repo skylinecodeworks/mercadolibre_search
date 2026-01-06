@@ -120,7 +120,28 @@ def extract_picture_url(item):
         src = img.get('data-src') or img.get('data-original') or ""
     return src
 
+def determine_currency_and_format(price_num):
+    """
+    Determines currency based on price magnitude and formats the price string.
+    Rule: Price > 1,000,000 -> ARS (Pesos Argentinos)
+          Price <= 1,000,000 -> USD (Dólares)
+    Returns: (currency_code, formatted_price_string)
+    """
+    if not price_num:
+        return 'N/A', 'N/A'
 
+    # Threshold logic: > 1 million is likely ARS
+    if price_num > 1000000:
+        currency = 'ARS'
+        # Format with dots for thousands: 15000000 -> 15.000.000
+        formatted_num = f"{price_num:,.0f}".replace(',', '.')
+        price_formatted = f"$ {formatted_num}"
+    else:
+        currency = 'USD'
+        formatted_num = f"{price_num:,.0f}".replace(',', '.')
+        price_formatted = f"US$ {formatted_num}"
+
+    return currency, price_formatted
 
 def scrape_mercado_libre(search_term):
     base_url = "https://listado.mercadolibre.com.ar/"
@@ -155,21 +176,33 @@ def scrape_mercado_libre(search_term):
                         continue
                     picture_url = extract_picture_url(item)
                     price_elem = item.find('span', class_='andes-money-amount__fraction')
-                    price = f"US${price_elem.text.strip()}" if price_elem and price_elem.text else 'N/A'
+                    price_text = price_elem.text.strip() if price_elem and price_elem.text else 'N/A'
+
+                    price_num = 0
+                    if price_text != 'N/A':
+                        try:
+                            # Remove existing formatting to get raw number
+                            price_num = int(price_text.replace('.', '').replace(',', '').strip())
+                        except ValueError:
+                            price_num = 0
+
+                    currency, price_formatted = determine_currency_and_format(price_num)
+
                     details = item.find_all('li', class_='poly-attributes_list__item')
                     year = details[0].text.strip() if len(details) > 0 and details[0].text else 'N/A'
                     km = details[1].text.strip() if len(details) > 1 and details[1].text else 'N/A'
                     location_elem = item.find('span', class_='poly-component__location')
                     location = location_elem.text.strip() if location_elem and location_elem.text else 'N/A'
-                    price_num = int(price.replace('US$', '').replace('.', '').strip()) if price != 'N/A' else 0
+
                     year_num = int(year) if year != 'N/A' else 0
                     km_num = int(km.replace('Km', '').replace('.', '').strip()) if km != 'N/A' else 0
                     all_items.append({
                         'unique_id': unique_id,
                         'image': picture_url,
                         'description': title,
-                        'price': price,
+                        'price': price_formatted,
                         'price_num': price_num,
+                        'currency': currency,
                         'year': year,
                         'year_num': year_num,
                         'kilometers': km,
@@ -235,8 +268,20 @@ def index():
         else:
             df = scrape_mercado_libre(search_term)
 
+        # Post-process DataFrame to ensure currency and correct price formatting
+        # This handles both new scrapes (which already have it) and historical data (which might not)
         variation_list = []
+        currencies = []
+        formatted_prices = []
+
         for _, row in df.iterrows():
+            # Currency and Price formatting
+            p_num = row.get('price_num', 0)
+            curr, p_fmt = determine_currency_and_format(p_num)
+            currencies.append(curr)
+            formatted_prices.append(p_fmt)
+
+            # Variation logic
             current_date_str = row.get('date_str', datetime.utcnow().strftime('%Y-%m-%d'))
             prev_doc = cars_collection.find_one({
                 'unique_id': row['unique_id'],
@@ -254,12 +299,16 @@ def index():
             else:
                 variation = '='
             variation_list.append(variation)
+
+        df['currency'] = currencies
+        df['price'] = formatted_prices
         df['variación'] = variation_list
+
         if 'image' not in df.columns:
             df['image'] = ""
-        # Orden de columnas
-        cols = ['image'] + [col for col in df.columns if col not in ['image', 'variación']] + ['variación']
-        df = df[cols]
+
+        # Explicit column order is not strictly necessary here because we will use explicit columns in HTML
+        # But we can keep it clean if we want
         if sort and sort in df.columns:
             df = df.sort_values(by=sort, ascending=(order == 'asc'))
         #csv_filename = f"mercado_libre_{search_term.replace(' ', '_')}.csv"
@@ -317,11 +366,13 @@ def index():
                     <table id="resultsTable" class="table table-striped table-hover align-middle">
                         <thead>
                             <tr>
-                                {% for column in df.columns %}
-                                    {% if column != "link" %}
-                                        <th>{{ column.capitalize() }}</th>
-                                    {% endif %}
-                                {% endfor %}
+                                <th>Imagen</th>
+                                <th>Descripción</th>
+                                <th>Precio</th>
+                                <th>Moneda</th>
+                                <th>Año</th>
+                                <th>Km</th>
+                                <th>Ubicación</th>
                                 <th>Enlace</th>
                                 <th>Evolución</th>
                             </tr>
@@ -329,23 +380,21 @@ def index():
                         <tbody>
                             {% for _, row in df.iterrows() %}
                             <tr>
-                                {% for col in df.columns %}
-                                    {% if col == "image" %}
-                                        <td>
-                                            {% if row.image %}
-                                                <img src="{{ row.image }}" class="product-thumb" loading="lazy">
-                                            {% else %}
-                                                <span class="text-secondary">N/A</span>
-                                            {% endif %}
-                                        </td>
-                                    {% elif col == "link" %}
-                                        <!-- la columna 'link' va como botón fuera -->
-                                    {% else %}
-                                        <td>{{ row[col] if row[col] is not none else '' }}</td>
-                                    {% endif %}
-                                {% endfor %}
                                 <td>
-                                    {% if 'link' in row %}
+                                    {% if row.image %}
+                                        <img src="{{ row.image }}" class="product-thumb" loading="lazy">
+                                    {% else %}
+                                        <span class="text-secondary">N/A</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.description }}</td>
+                                <td data-order="{{ row.price_num }}">{{ row.price }}</td>
+                                <td>{{ row.currency }}</td>
+                                <td data-order="{{ row.year_num }}">{{ row.year }}</td>
+                                <td data-order="{{ row.kilometers_num }}">{{ row.kilometers }}</td>
+                                <td>{{ row.location }}</td>
+                                <td>
+                                    {% if row.link %}
                                     <a href="{{ row.link }}" class="btn btn-outline-primary btn-sm fw-semibold" target="_blank">
                                         Ver producto
                                     </a>
@@ -363,6 +412,19 @@ def index():
                             </tr>
                             {% endfor %}
                         </tbody>
+                        <tfoot>
+                             <tr>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th><select id="currencyFilter" class="form-select form-select-sm"><option value="">Todos</option><option value="ARS">ARS</option><option value="USD">USD</option></select></th>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -396,10 +458,15 @@ def index():
             }
         }
         $(document).ready(function() {
-            $('#resultsTable').DataTable({
+            var table = $('#resultsTable').DataTable({
                 paging: false,
                 info: false,
                 language: {search: "Buscar:", zeroRecords: "No se encontraron registros"}
+            });
+
+            $('#currencyFilter').on('change', function() {
+                var val = $.fn.dataTable.util.escapeRegex($(this).val());
+                table.column(3).search(val ? '^'+val+'$' : '', true, false).draw();
             });
         });
 
