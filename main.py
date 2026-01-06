@@ -40,13 +40,19 @@ mongo_password = os.getenv("MONGO_PASSWORD")
 mongo_host = os.getenv("MONGO_HOST", "localhost")
 mongo_port = os.getenv("MONGO_PORT", "27017")
 mongo_db_name = os.getenv("MONGO_DB", "ml")
+mongo_auth_source = os.getenv("MONGO_AUTH_SOURCE", "admin")
 
 if mongo_user and mongo_password:
-    mongo_uri = f"mongodb://{quote_plus(mongo_user)}:{quote_plus(mongo_password)}@{mongo_host}:{mongo_port}/{mongo_db_name}"
+    mongo_uri = f"mongodb://{quote_plus(mongo_user)}:{quote_plus(mongo_password)}@{mongo_host}:{mongo_port}/{mongo_db_name}?authSource={mongo_auth_source}"
 else:
     mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
 
-mongo_client = MongoClient(os.getenv("MONGO_URI", mongo_uri))
+final_mongo_uri = os.getenv("MONGO_URI", mongo_uri)
+# Log the URI with masked password for debugging
+masked_uri = re.sub(r':([^@]+)@', ':****@', final_mongo_uri)
+print(f"Connecting to MongoDB: {masked_uri}")
+
+mongo_client = MongoClient(final_mongo_uri)
 
 mongo_db = mongo_client[mongo_db_name]
 cars_collection = mongo_db[os.getenv("MONGO_COLLECTION", "cars")]
