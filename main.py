@@ -42,12 +42,24 @@ mongo_port = os.getenv("MONGO_PORT", "27017")
 mongo_db_name = os.getenv("MONGO_DB", "ml")
 mongo_auth_source = os.getenv("MONGO_AUTH_SOURCE", "admin")
 
+constructed_uri = None
 if mongo_user and mongo_password:
-    mongo_uri = f"mongodb://{quote_plus(mongo_user)}:{quote_plus(mongo_password)}@{mongo_host}:{mongo_port}/{mongo_db_name}?authSource={mongo_auth_source}"
-else:
-    mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
+    constructed_uri = f"mongodb://{quote_plus(mongo_user)}:{quote_plus(mongo_password)}@{mongo_host}:{mongo_port}/{mongo_db_name}?authSource={mongo_auth_source}"
 
-final_mongo_uri = os.getenv("MONGO_URI", mongo_uri)
+env_mongo_uri = os.getenv("MONGO_URI")
+
+if env_mongo_uri and "@" in env_mongo_uri:
+    final_mongo_uri = env_mongo_uri
+    logger.info("Configuration: Using MONGO_URI from environment (contains credentials).")
+elif constructed_uri:
+    final_mongo_uri = constructed_uri
+    logger.info("Configuration: Using constructed URI from MONGO_USER and MONGO_PASSWORD (ignoring credential-less MONGO_URI if present).")
+elif env_mongo_uri:
+    final_mongo_uri = env_mongo_uri
+    logger.info("Configuration: Using MONGO_URI from environment (no explicit credentials found in URI or env vars).")
+else:
+    final_mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
+    logger.info("Configuration: Using default localhost URI.")
 
 def diagnose_mongo_connection(uri):
     """
