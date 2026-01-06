@@ -258,8 +258,16 @@ def index():
     order = request.args.get('order', 'asc')
     search_terms = sorted(set(doc['search_term'] for doc in cars_collection.find({}, {'search_term': 1})))
     search_term = ""
+    exchange_rate = ""
+
     if request.method == 'POST':
         search_term = request.form.get('search_term') or request.form.get('dropdown_search_term') or ""
+        exchange_rate = request.form.get('exchange_rate', '')
+        try:
+            exchange_rate_val = float(exchange_rate) if exchange_rate else 0
+        except ValueError:
+            exchange_rate_val = 0
+
         action = request.form.get('action', 'scrape')
         web_logger.logs = []  # Clear previous logs
 
@@ -273,6 +281,7 @@ def index():
         variation_list = []
         currencies = []
         formatted_prices = []
+        normalized_prices = []
 
         for _, row in df.iterrows():
             # Currency and Price formatting
@@ -280,6 +289,13 @@ def index():
             curr, p_fmt = determine_currency_and_format(p_num)
             currencies.append(curr)
             formatted_prices.append(p_fmt)
+
+            # Normalization logic
+            if exchange_rate_val and exchange_rate_val > 0 and curr == 'ARS':
+                norm_price = p_num / exchange_rate_val
+            else:
+                norm_price = p_num
+            normalized_prices.append(norm_price)
 
             # Variation logic
             current_date_str = row.get('date_str', datetime.utcnow().strftime('%Y-%m-%d'))
@@ -303,6 +319,7 @@ def index():
         df['currency'] = currencies
         df['price'] = formatted_prices
         df['variación'] = variation_list
+        df['normalized_price'] = normalized_prices
 
         if 'image' not in df.columns:
             df['image'] = ""
@@ -339,11 +356,11 @@ def index():
             <div class="card shadow-sm mb-4">
                 <div class="card-body">
                     <form method="POST" id="searchForm" class="row g-3 align-items-end">
-                        <div class="col-md-5">
+                        <div class="col-md-4">
                             <label for="searchInput" class="form-label">Término a buscar</label>
                             <input type="text" name="search_term" id="searchInput" class="form-control" placeholder="Ejemplo: BMW X3" value="{{ search_term }}">
                         </div>
-                        <div class="col-md-5">
+                        <div class="col-md-4">
                             <label for="dropdown_search_term" class="form-label">Búsquedas anteriores</label>
                             <select name="dropdown_search_term" id="dropdown_search_term" class="form-select" onchange="onDropdownChange(this)">
                                 <option value="">-- Seleccione búsqueda anterior --</option>
@@ -351,6 +368,10 @@ def index():
                                     <option value="{{ term }}" {% if term == search_term %}selected{% endif %}>{{ term }}</option>
                                 {% endfor %}
                             </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label for="exchangeRate" class="form-label">Tipo de Cambio</label>
+                            <input type="number" step="0.01" name="exchange_rate" id="exchangeRate" class="form-control" placeholder="ARS/USD" value="{{ exchange_rate }}">
                         </div>
                         <div class="col-md-2 d-grid gap-2">
                             <button type="submit" name="action" value="scrape" class="btn btn-success fw-semibold">Scrapear</button>
@@ -388,7 +409,7 @@ def index():
                                     {% endif %}
                                 </td>
                                 <td>{{ row.description }}</td>
-                                <td data-order="{{ row.price_num }}">{{ row.price }}</td>
+                                <td data-order="{{ row.normalized_price }}">{{ row.price }}</td>
                                 <td>{{ row.currency }}</td>
                                 <td data-order="{{ row.year_num }}">{{ row.year }}</td>
                                 <td data-order="{{ row.kilometers_num }}">{{ row.kilometers }}</td>
@@ -507,7 +528,7 @@ def index():
         </script>
         </body>
         </html>
-        ''', logs=web_logger.logs, df=df, search_terms=search_terms, search_term=search_term)
+        ''', logs=web_logger.logs, df=df, search_terms=search_terms, search_term=search_term, exchange_rate=exchange_rate)
 
     # GET (página inicial)
     return render_template_string('''
@@ -533,6 +554,7 @@ def index():
                         <option value="{{ term }}">{{ term }}</option>
                     {% endfor %}
                 </select>
+                <input type="number" step="0.01" name="exchange_rate" placeholder="Tipo de cambio (ARS/USD)">
                 <button type="submit" name="action" value="scrape">Scrape</button>
                 <button type="submit" name="action" value="history">Ver Histórico</button>
             </form>
