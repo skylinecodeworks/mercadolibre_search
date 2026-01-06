@@ -151,6 +151,21 @@ def scrape_mercado_libre(search_term):
             cars_collection.replace_one(filter_query, rec, upsert=True)
     return df
 
+def get_historical_data(search_term):
+    print(f"Recuperando datos históricos para: {search_term}")
+    pipeline = [
+        {"$match": {"search_term": search_term}},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": "$unique_id",
+            "doc": {"$first": "$$ROOT"}
+        }},
+        {"$replaceRoot": {"newRoot": "$doc"}}
+    ]
+    results = list(cars_collection.aggregate(pipeline))
+    df = pd.DataFrame(results)
+    return df
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     sort = request.args.get('sort', '')
@@ -159,14 +174,21 @@ def index():
     search_term = ""
     if request.method == 'POST':
         search_term = request.form.get('search_term') or request.form.get('dropdown_search_term') or ""
+        action = request.form.get('action', 'scrape')
         web_logger.logs = []  # Clear previous logs
-        df = scrape_mercado_libre(search_term)
+
+        if action == 'history':
+            df = get_historical_data(search_term)
+        else:
+            df = scrape_mercado_libre(search_term)
+
         variation_list = []
         for _, row in df.iterrows():
+            current_date_str = row.get('date_str', datetime.utcnow().strftime('%Y-%m-%d'))
             prev_doc = cars_collection.find_one({
                 'unique_id': row['unique_id'],
                 'search_term': row['search_term'],
-                'date_str': {'$lt': datetime.utcnow().strftime('%Y-%m-%d')}
+                'date_str': {'$lt': current_date_str}
             }, sort=[('date_str', -1)])
             prev_price = prev_doc['price_num'] if prev_doc else None
             curr_price = row['price_num']
@@ -228,8 +250,9 @@ def index():
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-2 d-grid">
-                            <button type="submit" class="btn btn-success fw-semibold">Scrapear</button>
+                        <div class="col-md-2 d-grid gap-2">
+                            <button type="submit" name="action" value="scrape" class="btn btn-success fw-semibold">Scrapear</button>
+                            <button type="submit" name="action" value="history" class="btn btn-secondary fw-semibold">Ver Histórico</button>
                         </div>
                     </form>
                 </div>
@@ -316,8 +339,7 @@ def index():
         <script>
         function onDropdownChange(sel) {
             if(sel.value) {
-                document.getElementById('searchInput').value = '';
-                document.getElementById('searchForm').submit();
+                document.getElementById('searchInput').value = sel.value;
             }
         }
         $(document).ready(function() {
@@ -391,13 +413,13 @@ def index():
                         <option value="{{ term }}">{{ term }}</option>
                     {% endfor %}
                 </select>
-                <button type="submit">Scrape</button>
+                <button type="submit" name="action" value="scrape">Scrape</button>
+                <button type="submit" name="action" value="history">Ver Histórico</button>
             </form>
             <script>
             function onDropdownChange(sel) {
                 if(sel.value) {
-                    document.getElementById('searchInput').value = '';
-                    document.getElementById('searchForm').submit();
+                    document.getElementById('searchInput').value = sel.value;
                 }
             }
             </script>
