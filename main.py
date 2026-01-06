@@ -418,8 +418,9 @@ def index():
 
             <!-- Filter Card -->
             <div class="card shadow-sm mb-4">
-                <div class="card-header bg-light py-2">
+                <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 h6 fw-bold text-primary">Filtros de resultados</h5>
+                    <button type="button" id="resetFilters" class="btn btn-outline-danger btn-sm" style="font-size: 0.8em; padding: 2px 8px;">Reset</button>
                 </div>
                 <div class="card-body py-2">
                     <div class="row g-2">
@@ -555,6 +556,15 @@ def index():
             }
         }
         $(document).ready(function() {
+            // Restore filter values from localStorage
+            const filterIds = ['minPrice', 'maxPrice', 'minYear', 'maxYear', 'minKm', 'maxKm', 'locationFilter', 'evolutionFilter'];
+            filterIds.forEach(id => {
+                const storedVal = localStorage.getItem('ml_scraper_' + id);
+                if (storedVal !== null) {
+                    $('#' + id).val(storedVal);
+                }
+            });
+
             // Custom filtering function which will search data in column four between two values
             $.fn.dataTable.ext.search.push(
                 function(settings, data, dataIndex, rowData, counter) {
@@ -621,8 +631,19 @@ def index():
                 language: {search: "Buscar:", zeroRecords: "No se encontraron registros"}
             });
 
-            // Event listeners for inputs to redraw table
+            // Event listeners for inputs to redraw table and save to localStorage
             $('#minPrice, #maxPrice, #minYear, #maxYear, #minKm, #maxKm, #locationFilter, #evolutionFilter').on('keyup change', function() {
+                localStorage.setItem('ml_scraper_' + this.id, $(this).val());
+                table.draw();
+            });
+
+            // Reset filters button
+            $('#resetFilters').on('click', function() {
+                const filterIds = ['minPrice', 'maxPrice', 'minYear', 'maxYear', 'minKm', 'maxKm', 'locationFilter', 'evolutionFilter'];
+                filterIds.forEach(id => {
+                    localStorage.removeItem('ml_scraper_' + id);
+                    $('#' + id).val('');
+                });
                 table.draw();
             });
 
