@@ -48,9 +48,20 @@ else:
     mongo_uri = f"mongodb://{mongo_host}:{mongo_port}/"
 
 final_mongo_uri = os.getenv("MONGO_URI", mongo_uri)
-# Log the URI with masked password for debugging
+
+# Log the URI with masked password for debugging using logger to bypass WebLogger capture
 masked_uri = re.sub(r':([^@]+)@', ':****@', final_mongo_uri)
-print(f"Connecting to MongoDB: {masked_uri}")
+logger.info(f"Connecting to MongoDB: {masked_uri}")
+
+if os.getenv("MONGO_URI"):
+    logger.info("Using MONGO_URI from environment.")
+else:
+    if mongo_user:
+        logger.info(f"Detected MONGO_USER: {mongo_user}")
+        if not mongo_password:
+            logger.warning("MONGO_USER is set but MONGO_PASSWORD is missing! Connection might fail.")
+    else:
+        logger.info("No MONGO_USER set. Connecting without authentication (unless in MONGO_URI).")
 
 mongo_client = MongoClient(final_mongo_uri)
 
