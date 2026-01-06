@@ -127,8 +127,20 @@ def determine_currency_and_format(price_num):
           Price <= 1,000,000 -> USD (Dólares)
     Returns: (currency_code, formatted_price_string)
     """
-    if not price_num:
+    if price_num is None:
         return 'N/A', 'N/A'
+
+    # Ensure price_num is numeric
+    try:
+        price_num = float(price_num)
+        # Check for NaN
+        if price_num != price_num:
+            return 'N/A', 'N/A'
+    except (ValueError, TypeError):
+        return 'N/A', 'N/A'
+
+    if price_num == 0:
+         return 'N/A', 'N/A'
 
     # Threshold logic: > 1 million is likely ARS
     if price_num > 1000000:
@@ -181,8 +193,11 @@ def scrape_mercado_libre(search_term):
                     price_num = 0
                     if price_text != 'N/A':
                         try:
-                            # Remove existing formatting to get raw number
-                            price_num = int(price_text.replace('.', '').replace(',', '').strip())
+                            # Remove non-numeric characters except for digits
+                            # Clean "US$ 57.500.023" -> "57500023"
+                            clean_text = re.sub(r'[^\d]', '', price_text)
+                            if clean_text:
+                                price_num = int(clean_text)
                         except ValueError:
                             price_num = 0
 
