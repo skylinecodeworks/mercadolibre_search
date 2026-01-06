@@ -522,19 +522,6 @@ def index():
                             </tr>
                             {% endfor %}
                         </tbody>
-                        <tfoot>
-                             <tr>
-                                <th></th>
-                                <th></th>
-                                <th></th>
-                                <th><select id="currencyFilter" class="form-select form-select-sm"><option value="">Todos</option><option value="ARS">ARS</option><option value="USD">USD</option></select></th>
-                                <th></th>
-                                <th></th>
-                                <th></th>
-                                <th></th>
-                                <th></th>
-                            </tr>
-                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -639,10 +626,6 @@ def index():
                 table.draw();
             });
 
-            $('#currencyFilter').on('change', function() {
-                var val = $.fn.dataTable.util.escapeRegex($(this).val());
-                table.column(3).search(val ? '^'+val+'$' : '', true, false).draw();
-            });
         });
 
         // Modal gráfico evolución con Bootstrap
