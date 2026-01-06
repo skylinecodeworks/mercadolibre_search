@@ -259,10 +259,13 @@ def index():
     search_terms = sorted(set(doc['search_term'] for doc in cars_collection.find({}, {'search_term': 1})))
     search_term = ""
     exchange_rate = ""
+    target_currency = "USD"
 
     if request.method == 'POST':
         search_term = request.form.get('search_term') or request.form.get('dropdown_search_term') or ""
         exchange_rate = request.form.get('exchange_rate', '')
+        target_currency = request.form.get('target_currency', 'USD')
+
         try:
             exchange_rate_val = float(exchange_rate) if exchange_rate else 0
         except ValueError:
@@ -284,18 +287,43 @@ def index():
         normalized_prices = []
 
         for _, row in df.iterrows():
-            # Currency and Price formatting
+            # Original Currency detection
             p_num = row.get('price_num', 0)
-            curr, p_fmt = determine_currency_and_format(p_num)
-            currencies.append(curr)
+            src_curr, _ = determine_currency_and_format(p_num)
+
+            # Conversion Logic
+            final_price_val = p_num
+            final_curr = src_curr
+
+            if exchange_rate_val > 0:
+                if target_currency == 'USD' and src_curr == 'ARS':
+                    final_price_val = p_num / exchange_rate_val
+                    final_curr = 'USD'
+                elif target_currency == 'ARS' and src_curr == 'USD':
+                    final_price_val = p_num * exchange_rate_val
+                    final_curr = 'ARS'
+                elif target_currency == src_curr:
+                    final_curr = target_currency
+            else:
+                 # If no exchange rate, we can't convert, but user requested target_currency.
+                 # Current logic: default to original.
+                 # Or should we try to respect the target currency request if possible (e.g. they match)?
+                 if target_currency == src_curr:
+                     final_curr = target_currency
+
+            # Format the final price
+            if final_curr == 'ARS':
+                formatted_num = f"{final_price_val:,.0f}".replace(',', '.')
+                p_fmt = f"$ {formatted_num}"
+            else:
+                formatted_num = f"{final_price_val:,.0f}".replace(',', '.')
+                p_fmt = f"US$ {formatted_num}"
+
+            currencies.append(final_curr)
             formatted_prices.append(p_fmt)
 
-            # Normalization logic
-            if exchange_rate_val and exchange_rate_val > 0 and curr == 'ARS':
-                norm_price = p_num / exchange_rate_val
-            else:
-                norm_price = p_num
-            normalized_prices.append(norm_price)
+            # Normalized price (for sorting) should align with the displayed currency
+            normalized_prices.append(final_price_val)
 
             # Variation logic
             current_date_str = row.get('date_str', datetime.utcnow().strftime('%Y-%m-%d'))
@@ -372,6 +400,13 @@ def index():
                         <div class="col-md-2">
                             <label for="exchangeRate" class="form-label">Tipo de Cambio</label>
                             <input type="number" step="0.01" name="exchange_rate" id="exchangeRate" class="form-control" placeholder="ARS/USD" value="{{ exchange_rate }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label for="targetCurrency" class="form-label">Moneda Base</label>
+                            <select name="target_currency" id="targetCurrency" class="form-select">
+                                <option value="USD" {% if target_currency == 'USD' %}selected{% endif %}>USD</option>
+                                <option value="ARS" {% if target_currency == 'ARS' %}selected{% endif %}>ARS</option>
+                            </select>
                         </div>
                         <div class="col-md-2 d-grid gap-2">
                             <button type="submit" name="action" value="scrape" class="btn btn-success fw-semibold">Scrapear</button>
@@ -647,7 +682,7 @@ def index():
         </script>
         </body>
         </html>
-        ''', logs=web_logger.logs, df=df, search_terms=search_terms, search_term=search_term, exchange_rate=exchange_rate)
+        ''', logs=web_logger.logs, df=df, search_terms=search_terms, search_term=search_term, exchange_rate=exchange_rate, target_currency=target_currency)
 
     # GET (página inicial)
     return render_template_string('''
@@ -674,6 +709,10 @@ def index():
                     {% endfor %}
                 </select>
                 <input type="number" step="0.01" name="exchange_rate" placeholder="Tipo de cambio (ARS/USD)">
+                <select name="target_currency">
+                    <option value="USD" selected>USD</option>
+                    <option value="ARS">ARS</option>
+                </select>
                 <button type="submit" name="action" value="scrape">Scrape</button>
                 <button type="submit" name="action" value="history">Ver Histórico</button>
             </form>
