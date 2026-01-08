@@ -159,17 +159,18 @@ def get_session():
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-Site': 'same-origin',
         'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1'
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.mercadolibre.com.ar/'
     })
     return session
 
@@ -190,13 +191,28 @@ def scrape_mercado_libre(search_term):
                 break
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Check for blocking/verification
+            if "account-verification" in response.text or "suspicious-traffic" in response.text:
+                print("Scraper blocked by MercadoLibre security check (account verification/suspicious traffic).")
+                break
+
             no_results = soup.find('p', class_='ui-search-sidebar__no-results-message')
             if no_results:
                 print(f"No results message detected: {no_results.text.strip()}")
                 break
+
+            # Try multiple selectors for items
             items = soup.find_all('div', class_='ui-search-result__wrapper')
             if not items:
+                items = soup.find_all('div', class_='ui-search-result__content-wrapper')
+            if not items:
+                items = soup.find_all('li', class_='ui-search-layout__item')
+
+            if not items:
                 print("No items found in page")
+                # Debug: Print title to see what page we are on if not blocked but no items
+                print(f"Page title: {soup.title.text if soup.title else 'No title'}")
                 break
             for item in items:
                 try:
