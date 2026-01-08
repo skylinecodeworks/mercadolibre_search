@@ -383,7 +383,7 @@ def get_all_prices(search_term=None):
 def index():
     sort = request.args.get('sort', '')
     order = request.args.get('order', 'asc')
-    search_terms = sorted(set(doc['search_term'] for doc in cars_collection.find({}, {'search_term': 1})))
+    search_terms = sorted(set(doc.get('search_term') for doc in cars_collection.find({}, {'search_term': 1}) if doc.get('search_term')))
     search_term = ""
     exchange_rate = ""
     target_currency = "USD"
@@ -473,11 +473,11 @@ def index():
             current_date_str = row.get('date_str', datetime.utcnow().strftime('%Y-%m-%d'))
             prev_doc = cars_collection.find_one({
                 'unique_id': row['unique_id'],
-                'search_term': row['search_term'],
+                'search_term': row.get('search_term', search_term),
                 'date_str': {'$lt': current_date_str}
             }, sort=[('date_str', -1)])
-            prev_price = prev_doc['price_num'] if prev_doc else None
-            curr_price = row['price_num']
+            prev_price = prev_doc.get('price_num') if prev_doc else None
+            curr_price = row.get('price_num', 0)
             if prev_price is None:
                 variation = ''
             elif curr_price > prev_price:
