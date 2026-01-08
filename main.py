@@ -826,7 +826,7 @@ def index():
         // Logging en consola
         {% if logs %}
             {% for log in logs %}
-                console.log("[SCRAPER]", `{{ log|e }}`);
+                console.log("[SCRAPER]", {{ log|tojson }});
             {% endfor %}
         {% endif %}
         </script>
@@ -878,7 +878,7 @@ def index():
             <script>
                 {% if logs %}
                     {% for log in logs %}
-                        console.log("[SCRAPER]", `{{ log|e }}`);
+                        console.log("[SCRAPER]", {{ log|tojson }});
                     {% endfor %}
                 {% endif %}
             </script>
