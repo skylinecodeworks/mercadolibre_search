@@ -826,7 +826,11 @@ def index():
         // Logging en consola
         {% if logs %}
             {% for log in logs %}
-                console.log("[SCRAPER]", {{ log|tojson }});
+                try {
+                    console.log("[SCRAPER]", {{ log|tojson }});
+                } catch (e) {
+                    console.error("Error displaying log", e);
+                }
             {% endfor %}
         {% endif %}
         </script>
@@ -878,7 +882,11 @@ def index():
             <script>
                 {% if logs %}
                     {% for log in logs %}
-                        console.log("[SCRAPER]", {{ log|tojson }});
+                        try {
+                            console.log("[SCRAPER]", {{ log|tojson }});
+                        } catch (e) {
+                            console.error("Error displaying log", e);
+                        }
                     {% endfor %}
                 {% endif %}
             </script>
