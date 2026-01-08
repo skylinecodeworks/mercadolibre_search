@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, send_file, jsonify
+from flask import Flask, render_template_string, request, send_file, jsonify, redirect, url_for
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -284,15 +284,23 @@ def get_historical_data(search_term):
     df = pd.DataFrame(results)
     return df
 
-def get_inventory_stats():
+def get_inventory_stats(search_term=None):
+    match = {}
+    if search_term:
+        match = {"search_term": search_term}
     pipeline = [
+        {"$match": match},
         {"$group": {"_id": "$search_term", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
     ]
     return list(cars_collection.aggregate(pipeline))
 
-def get_price_stats():
+def get_price_stats(search_term=None):
+    match = {}
+    if search_term:
+        match = {"search_term": search_term}
     pipeline = [
+        {"$match": match},
         {"$group": {
             "_id": {"term": "$search_term", "currency": "$currency"},
             "avg_price": {"$avg": "$price_num"}
@@ -301,9 +309,12 @@ def get_price_stats():
     ]
     return list(cars_collection.aggregate(pipeline))
 
-def get_year_stats():
+def get_year_stats(search_term=None):
+    match = {"year_num": {"$gt": 0}}
+    if search_term:
+        match["search_term"] = search_term
     pipeline = [
-        {"$match": {"year_num": {"$gt": 0}}},
+        {"$match": match},
         {"$group": {
             "_id": {"year": "$year_num", "currency": "$currency"},
             "avg_price": {"$avg": "$price_num"},
@@ -313,6 +324,39 @@ def get_year_stats():
         {"$sort": {"_id.year": 1}}
     ]
     return list(cars_collection.aggregate(pipeline))
+
+def get_location_stats(search_term=None):
+    match = {}
+    if search_term:
+        match = {"search_term": search_term}
+    pipeline = [
+        {"$match": match},
+        {"$group": {"_id": "$location", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10}
+    ]
+    return list(cars_collection.aggregate(pipeline))
+
+def get_daily_price_stats(search_term=None):
+    match = {}
+    if search_term:
+        match = {"search_term": search_term}
+    pipeline = [
+        {"$match": match},
+        {"$group": {
+            "_id": {"date": "$date_str", "currency": "$currency"},
+            "avg_price": {"$avg": "$price_num"},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id.date": 1}}
+    ]
+    return list(cars_collection.aggregate(pipeline))
+
+def get_all_prices(search_term=None):
+    query = {}
+    if search_term:
+        query["search_term"] = search_term
+    return list(cars_collection.find(query, {"price_num": 1, "currency": 1, "_id": 0}))
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -338,6 +382,8 @@ def index():
 
         if action == 'history':
             df = get_historical_data(search_term)
+        elif action == 'charts':
+            return redirect(url_for('charts_view', search_term=search_term, exchange_rate=exchange_rate))
         elif action == 'scrape_all':
             all_dfs = []
             for term in search_terms:
@@ -489,7 +535,7 @@ def index():
                             <button type="submit" name="action" value="scrape" class="btn btn-success fw-semibold">Scrapear</button>
                             <button type="submit" name="action" value="scrape_all" class="btn btn-warning fw-semibold">Scrapear Todos</button>
                             <button type="submit" name="action" value="history" class="btn btn-secondary fw-semibold">Ver Histórico</button>
-                            <a href="/charts" class="btn btn-info fw-semibold">Ver Estadísticas</a>
+                            <button type="submit" name="action" value="charts" class="btn btn-info fw-semibold">Ver Estadísticas</button>
                         </div>
                     </form>
                 </div>
@@ -799,7 +845,7 @@ def index():
                 <button type="submit" name="action" value="scrape">Scrape</button>
                 <button type="submit" name="action" value="scrape_all">Scrapear Todos</button>
                 <button type="submit" name="action" value="history">Ver Histórico</button>
-                <a href="/charts" style="margin-left:10px;">Ver Estadísticas</a>
+                <button type="submit" name="action" value="charts" style="margin-left:10px;">Ver Estadísticas</button>
             </form>
             <script>
             function onDropdownChange(sel) {
@@ -839,16 +885,54 @@ def history():
 
 @app.route('/charts', methods=['GET', 'POST'])
 def charts_view():
-    # Fetch data
-    inventory_stats = get_inventory_stats()
-    price_stats = get_price_stats()
-    year_stats = get_year_stats()
+    search_term = request.args.get('search_term', request.form.get('search_term', ''))
+    exchange_rate = request.args.get('exchange_rate', request.form.get('exchange_rate', ''))
 
-    exchange_rate = request.form.get('exchange_rate', '')
     try:
         exchange_rate_val = float(exchange_rate) if exchange_rate else 0
     except ValueError:
         exchange_rate_val = 0
+
+    # Fetch data
+    inventory_stats = get_inventory_stats(search_term)
+    price_stats = get_price_stats(search_term)
+    year_stats = get_year_stats(search_term)
+    location_stats = get_location_stats(search_term)
+    daily_price_stats = get_daily_price_stats(search_term)
+    all_prices = get_all_prices(search_term)
+
+    # Calculate Price Distribution in Python
+    price_dist = {'labels': [], 'data': []}
+    if all_prices:
+        normalized = []
+        for item in all_prices:
+            p = item.get('price_num', 0)
+            c = item.get('currency', 'USD')
+            val = p
+            if c == 'ARS' and exchange_rate_val > 0:
+                val = p / exchange_rate_val
+            elif c == 'ARS' and exchange_rate_val == 0:
+                continue # Skip unconvertible ARS if we want USD distribution
+
+            if val > 0:
+                normalized.append(val)
+
+        if normalized:
+            # Simple histogram logic
+            min_p = min(normalized)
+            max_p = max(normalized)
+            # Create 10 bins
+            if min_p == max_p:
+                price_dist['labels'] = [f"{min_p:,.0f}"]
+                price_dist['data'] = [len(normalized)]
+            else:
+                import numpy as np
+                counts, bin_edges = np.histogram(normalized, bins=10)
+                price_dist['data'] = counts.tolist()
+                labels = []
+                for i in range(len(bin_edges)-1):
+                    labels.append(f"{bin_edges[i]:,.0f} - {bin_edges[i+1]:,.0f}")
+                price_dist['labels'] = labels
 
     return render_template_string('''
     <!DOCTYPE html>
@@ -871,9 +955,22 @@ def charts_view():
             <a href="/" class="btn btn-outline-secondary">← Volver al Listado</a>
         </div>
 
+        {% if search_term %}
+        <div class="alert alert-info d-flex align-items-center" role="alert">
+            <svg class="bi flex-shrink-0 me-2" width="24" height="24" role="img" aria-label="Info:"><use xlink:href="#info-fill"/></svg>
+            <div>
+                Mostrando resultados para: <strong>{{ search_term }}</strong>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card mb-4">
             <div class="card-body">
-                <form method="POST" class="row align-items-end">
+                <form method="GET" class="row align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">Término de Búsqueda</label>
+                        <input type="text" name="search_term" class="form-control" value="{{ search_term }}" placeholder="Opcional">
+                    </div>
                     <div class="col-md-3">
                         <label class="form-label">Tasa de Cambio (ARS/USD)</label>
                         <input type="number" step="0.01" name="exchange_rate" class="form-control" placeholder="Ej: 1200" value="{{ exchange_rate }}">
@@ -887,10 +984,10 @@ def charts_view():
         </div>
 
         <div class="row g-4">
-            <!-- 1. Inventory Volume -->
-            <div class="col-md-6">
+            <!-- 1. Inventory Volume (or single stat if filtered) -->
+            <div class="col-md-4">
                 <div class="card h-100">
-                    <div class="card-header">Volumen de Publicaciones por Búsqueda</div>
+                    <div class="card-header">Inventario</div>
                     <div class="card-body">
                          <div class="chart-container">
                             <canvas id="inventoryChart"></canvas>
@@ -899,7 +996,43 @@ def charts_view():
                 </div>
             </div>
 
-            <!-- 2. Average Price per Model -->
+            <!-- 2. Location Distribution -->
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">Top Ubicaciones</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="locationChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Price Distribution -->
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">Distribución de Precios (USD)</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="priceDistChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Price Evolution (Time) -->
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header">Evolución de Precio Promedio en el Tiempo</div>
+                    <div class="card-body">
+                        <div class="chart-container" style="height: 300px;">
+                            <canvas id="evolutionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Price by Model (Legacy) -->
             <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-header">Precio Promedio por Modelo (Estimado en USD)</div>
@@ -911,7 +1044,7 @@ def charts_view():
                 </div>
             </div>
 
-            <!-- 3. Price Depreciaton by Year -->
+            <!-- 6. Price Depreciaton by Year -->
             <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-header">Curva de Depreciación (Precio vs Año)</div>
@@ -923,7 +1056,7 @@ def charts_view():
                 </div>
             </div>
 
-            <!-- 4. Usage by Year -->
+            <!-- 7. Usage by Year -->
             <div class="col-md-6">
                 <div class="card h-100">
                     <div class="card-header">Uso Promedio (Km) por Año del Vehículo</div>
@@ -945,7 +1078,20 @@ def charts_view():
         const inventoryData = {{ inventory_stats | tojson }};
         const priceStats = {{ price_stats | tojson }};
         const yearStats = {{ year_stats | tojson }};
+        const locationStats = {{ location_stats | tojson }};
+        const dailyPriceStats = {{ daily_price_stats | tojson }};
+        const priceDist = {{ price_dist | tojson }};
         const exchangeRate = {{ exchange_rate_val }};
+
+        // Helper for colors
+        const colors = ['#4a6fa5', '#6d8bc7', '#92a8d1', '#b6c5e3', '#dbe2f5', '#ff6b6b', '#ffd93d', '#6bcb77', '#ff9f43', '#54a0ff'];
+
+        // --- Helper for Currency Normalization ---
+        function normalizePrice(price, currency) {
+            if (currency === 'USD') return price;
+            if (currency === 'ARS' && exchangeRate > 0) return price / exchangeRate;
+            return null; // Ignore if cannot convert
+        }
 
         // --- 1. Inventory Chart ---
         const invLabels = inventoryData.map(d => d._id);
@@ -957,26 +1103,76 @@ def charts_view():
                 labels: invLabels,
                 datasets: [{
                     data: invCounts,
-                    backgroundColor: [
-                        '#4a6fa5', '#6d8bc7', '#92a8d1', '#b6c5e3', '#dbe2f5',
-                        '#ff6b6b', '#ffd93d', '#6bcb77'
-                    ],
+                    backgroundColor: colors,
                 }]
             },
             options: { maintainAspectRatio: false }
         });
 
-        // --- Helper for Currency Normalization ---
-        function normalizePrice(price, currency) {
-            if (currency === 'USD') return price;
-            if (currency === 'ARS' && exchangeRate > 0) return price / exchangeRate;
-            return null; // Ignore if cannot convert
-        }
+        // --- 2. Location Chart ---
+        const locLabels = locationStats.map(d => d._id);
+        const locCounts = locationStats.map(d => d.count);
 
-        // --- 2. Average Price Chart ---
-        // We need to merge USD and ARS entries for same term if possible, or show them?
-        // Let's try to normalize everything to USD if rate exists.
+        new Chart(document.getElementById('locationChart'), {
+            type: 'bar',
+            data: {
+                labels: locLabels,
+                datasets: [{
+                    label: 'Publicaciones',
+                    data: locCounts,
+                    backgroundColor: '#6d8bc7'
+                }]
+            },
+            options: { maintainAspectRatio: false, indexAxis: 'y' }
+        });
 
+        // --- 3. Price Distribution Chart ---
+        new Chart(document.getElementById('priceDistChart'), {
+            type: 'bar',
+            data: {
+                labels: priceDist.labels,
+                datasets: [{
+                    label: 'Frecuencia',
+                    data: priceDist.data,
+                    backgroundColor: '#ff9f43'
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+
+        // --- 4. Evolution Chart ---
+        const dates = [...new Set(dailyPriceStats.map(d => d._id.date))].sort();
+        const evolPrices = dates.map(d => {
+             const entries = dailyPriceStats.filter(stat => stat._id.date === d);
+             let total = 0;
+             let count = 0;
+             entries.forEach(e => {
+                 let val = normalizePrice(e.avg_price, e._id.currency);
+                 if (val !== null) {
+                     total += val * e.count;
+                     count += e.count;
+                 }
+             });
+             return count > 0 ? (total / count) : null;
+        });
+
+        new Chart(document.getElementById('evolutionChart'), {
+            type: 'line',
+            data: {
+                labels: dates,
+                datasets: [{
+                    label: 'Precio Promedio Diario (USD)',
+                    data: evolPrices,
+                    borderColor: '#54a0ff',
+                    backgroundColor: 'rgba(84, 160, 255, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+
+        // --- 5. Average Price by Model ---
         const terms = [...new Set(priceStats.map(d => d._id.term))];
         const avgPrices = terms.map(term => {
             // Find all entries for this term
@@ -1010,7 +1206,7 @@ def charts_view():
             options: { maintainAspectRatio: false }
         });
 
-        // --- 3 & 4 Year Stats (Depreciation & Usage) ---
+        // --- 6 & 7 Year Stats (Depreciation & Usage) ---
         // Group by Year
         const years = [...new Set(yearStats.map(d => d._id.year))].sort((a,b) => a - b);
 
@@ -1072,7 +1268,7 @@ def charts_view():
     </script>
     </body>
     </html>
-    ''', inventory_stats=inventory_stats, price_stats=price_stats, year_stats=year_stats, exchange_rate=exchange_rate, exchange_rate_val=exchange_rate_val)
+    ''', inventory_stats=inventory_stats, price_stats=price_stats, year_stats=year_stats, location_stats=location_stats, daily_price_stats=daily_price_stats, price_dist=price_dist, exchange_rate=exchange_rate, exchange_rate_val=exchange_rate_val, search_term=search_term)
 
 @app.route('/download/<filename>')
 def download(filename):
