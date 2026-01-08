@@ -195,6 +195,11 @@ def scrape_mercado_libre(search_term):
             # Check for blocking/verification
             if "account-verification" in response.text or "suspicious-traffic" in response.text:
                 print("Scraper blocked by MercadoLibre security check (account verification/suspicious traffic).")
+                print(f"DEBUG INFO - Status: {response.status_code}")
+                print(f"DEBUG INFO - Headers: {dict(response.headers)}")
+                # Sanitize content to avoid breaking frontend JS (backticks break template literals)
+                safe_content = response.text.replace('`', '"')
+                print(f"DEBUG INFO - Content: {safe_content!r}")
                 break
 
             no_results = soup.find('p', class_='ui-search-sidebar__no-results-message')
