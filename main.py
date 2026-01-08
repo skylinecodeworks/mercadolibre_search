@@ -29,8 +29,6 @@ class WebLogger:
     def __init__(self):
         self.logs = []
     def write(self, message):
-        if isinstance(message, bytes):
-            message = message.decode('utf-8', errors='replace')
         if message.strip():
             self.logs.append(message.strip())
     def flush(self):
@@ -161,18 +159,17 @@ def get_session():
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Sec-Ch-Ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
         'Sec-Ch-Ua-Mobile': '?0',
         'Sec-Ch-Ua-Platform': '"Windows"',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1',
-        'Referer': 'https://www.mercadolibre.com.ar/'
+        'Upgrade-Insecure-Requests': '1'
     })
     return session
 
@@ -193,23 +190,13 @@ def scrape_mercado_libre(search_term):
                 break
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
-
             no_results = soup.find('p', class_='ui-search-sidebar__no-results-message')
             if no_results:
                 print(f"No results message detected: {no_results.text.strip()}")
                 break
-
-            # Try multiple selectors for items
             items = soup.find_all('div', class_='ui-search-result__wrapper')
             if not items:
-                items = soup.find_all('div', class_='ui-search-result__content-wrapper')
-            if not items:
-                items = soup.find_all('li', class_='ui-search-layout__item')
-
-            if not items:
                 print("No items found in page")
-                # Debug: Print title to see what page we are on if not blocked but no items
-                print(f"Page title: {soup.title.text if soup.title else 'No title'}")
                 break
             for item in items:
                 try:
@@ -301,7 +288,7 @@ def get_historical_data(search_term):
 def index():
     sort = request.args.get('sort', '')
     order = request.args.get('order', 'asc')
-    search_terms = sorted(set(doc.get('search_term') for doc in cars_collection.find({}, {'search_term': 1}) if doc.get('search_term')))
+    search_terms = sorted(set(doc['search_term'] for doc in cars_collection.find({}, {'search_term': 1})))
     search_term = ""
     exchange_rate = ""
     target_currency = "USD"
@@ -389,11 +376,11 @@ def index():
             current_date_str = row.get('date_str', datetime.utcnow().strftime('%Y-%m-%d'))
             prev_doc = cars_collection.find_one({
                 'unique_id': row['unique_id'],
-                'search_term': row.get('search_term', search_term),
+                'search_term': row['search_term'],
                 'date_str': {'$lt': current_date_str}
             }, sort=[('date_str', -1)])
-            prev_price = prev_doc.get('price_num') if prev_doc else None
-            curr_price = row.get('price_num', 0)
+            prev_price = prev_doc['price_num'] if prev_doc else None
+            curr_price = row['price_num']
             if prev_price is None:
                 variation = ''
             elif curr_price > prev_price:
@@ -741,11 +728,7 @@ def index():
         // Logging en consola
         {% if logs %}
             {% for log in logs %}
-                try {
-                    console.log("[SCRAPER]", {{ log|tojson }});
-                } catch (e) {
-                    console.error("Error displaying log", e);
-                }
+                console.log("[SCRAPER]", `{{ log|e }}`);
             {% endfor %}
         {% endif %}
         </script>
@@ -796,11 +779,7 @@ def index():
             <script>
                 {% if logs %}
                     {% for log in logs %}
-                        try {
-                            console.log("[SCRAPER]", {{ log|tojson }});
-                        } catch (e) {
-                            console.error("Error displaying log", e);
-                        }
+                        console.log("[SCRAPER]", `{{ log|e }}`);
                     {% endfor %}
                 {% endif %}
             </script>
