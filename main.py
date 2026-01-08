@@ -284,6 +284,36 @@ def get_historical_data(search_term):
     df = pd.DataFrame(results)
     return df
 
+def get_inventory_stats():
+    pipeline = [
+        {"$group": {"_id": "$search_term", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    return list(cars_collection.aggregate(pipeline))
+
+def get_price_stats():
+    pipeline = [
+        {"$group": {
+            "_id": {"term": "$search_term", "currency": "$currency"},
+            "avg_price": {"$avg": "$price_num"}
+        }},
+        {"$sort": {"_id.term": 1}}
+    ]
+    return list(cars_collection.aggregate(pipeline))
+
+def get_year_stats():
+    pipeline = [
+        {"$match": {"year_num": {"$gt": 0}}},
+        {"$group": {
+            "_id": {"year": "$year_num", "currency": "$currency"},
+            "avg_price": {"$avg": "$price_num"},
+            "avg_km": {"$avg": "$kilometers_num"},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id.year": 1}}
+    ]
+    return list(cars_collection.aggregate(pipeline))
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     sort = request.args.get('sort', '')
@@ -459,6 +489,7 @@ def index():
                             <button type="submit" name="action" value="scrape" class="btn btn-success fw-semibold">Scrapear</button>
                             <button type="submit" name="action" value="scrape_all" class="btn btn-warning fw-semibold">Scrapear Todos</button>
                             <button type="submit" name="action" value="history" class="btn btn-secondary fw-semibold">Ver Histórico</button>
+                            <a href="/charts" class="btn btn-info fw-semibold">Ver Estadísticas</a>
                         </div>
                     </form>
                 </div>
@@ -768,6 +799,7 @@ def index():
                 <button type="submit" name="action" value="scrape">Scrape</button>
                 <button type="submit" name="action" value="scrape_all">Scrapear Todos</button>
                 <button type="submit" name="action" value="history">Ver Histórico</button>
+                <a href="/charts" style="margin-left:10px;">Ver Estadísticas</a>
             </form>
             <script>
             function onDropdownChange(sel) {
@@ -804,6 +836,243 @@ def history():
             history_points.setdefault(date, []).append(price)
     history_list = [{'date': date, 'avg_price': sum(prices)//len(prices)} for date, prices in sorted(history_points.items())]
     return jsonify({'history': history_list})
+
+@app.route('/charts', methods=['GET', 'POST'])
+def charts_view():
+    # Fetch data
+    inventory_stats = get_inventory_stats()
+    price_stats = get_price_stats()
+    year_stats = get_year_stats()
+
+    exchange_rate = request.form.get('exchange_rate', '')
+    try:
+        exchange_rate_val = float(exchange_rate) if exchange_rate else 0
+    except ValueError:
+        exchange_rate_val = 0
+
+    return render_template_string('''
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <title>Estadísticas y Gráficos - Mercado Libre Scraper</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body { background: #f6f7fa; }
+            .container { max-width: 1400px; margin-top: 35px; margin-bottom: 50px; }
+            .card { border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: none; }
+            .card-header { background: #fff; border-bottom: 1px solid #eee; padding: 15px 20px; font-weight: 600; color: #33416c; border-radius: 12px 12px 0 0 !important; }
+            .chart-container { position: relative; height: 350px; width: 100%; }
+        </style>
+    </head>
+    <body>
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="display-5 fw-bold text-primary">Estadísticas del Mercado</h1>
+            <a href="/" class="btn btn-outline-secondary">← Volver al Listado</a>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-body">
+                <form method="POST" class="row align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">Tasa de Cambio (ARS/USD)</label>
+                        <input type="number" step="0.01" name="exchange_rate" class="form-control" placeholder="Ej: 1200" value="{{ exchange_rate }}">
+                        <div class="form-text small">Para unificar precios en los gráficos.</div>
+                    </div>
+                    <div class="col-md-2">
+                         <button type="submit" class="btn btn-primary w-100">Actualizar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- 1. Inventory Volume -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">Volumen de Publicaciones por Búsqueda</div>
+                    <div class="card-body">
+                         <div class="chart-container">
+                            <canvas id="inventoryChart"></canvas>
+                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Average Price per Model -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">Precio Promedio por Modelo (Estimado en USD)</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="priceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Price Depreciaton by Year -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">Curva de Depreciación (Precio vs Año)</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="depreciationChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Usage by Year -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header">Uso Promedio (Km) por Año del Vehículo</div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="usageChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Data passed from Flask
+        const inventoryData = {{ inventory_stats | tojson }};
+        const priceStats = {{ price_stats | tojson }};
+        const yearStats = {{ year_stats | tojson }};
+        const exchangeRate = {{ exchange_rate_val }};
+
+        // --- 1. Inventory Chart ---
+        const invLabels = inventoryData.map(d => d._id);
+        const invCounts = inventoryData.map(d => d.count);
+
+        new Chart(document.getElementById('inventoryChart'), {
+            type: 'doughnut',
+            data: {
+                labels: invLabels,
+                datasets: [{
+                    data: invCounts,
+                    backgroundColor: [
+                        '#4a6fa5', '#6d8bc7', '#92a8d1', '#b6c5e3', '#dbe2f5',
+                        '#ff6b6b', '#ffd93d', '#6bcb77'
+                    ],
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+
+        // --- Helper for Currency Normalization ---
+        function normalizePrice(price, currency) {
+            if (currency === 'USD') return price;
+            if (currency === 'ARS' && exchangeRate > 0) return price / exchangeRate;
+            return null; // Ignore if cannot convert
+        }
+
+        // --- 2. Average Price Chart ---
+        // We need to merge USD and ARS entries for same term if possible, or show them?
+        // Let's try to normalize everything to USD if rate exists.
+
+        const terms = [...new Set(priceStats.map(d => d._id.term))];
+        const avgPrices = terms.map(term => {
+            // Find all entries for this term
+            const entries = priceStats.filter(d => d._id.term === term);
+            let totalVal = 0;
+            let count = 0;
+            entries.forEach(e => {
+                let val = normalizePrice(e.avg_price, e._id.currency);
+                // If no exchange rate, only take USD
+                if (val !== null) {
+                    totalVal += val;
+                    count++;
+                } else if (exchangeRate === 0 && e._id.currency === 'USD') {
+                     totalVal += e.avg_price;
+                     count++;
+                }
+            });
+            return count > 0 ? (totalVal / count) : 0;
+        });
+
+        new Chart(document.getElementById('priceChart'), {
+            type: 'bar',
+            data: {
+                labels: terms,
+                datasets: [{
+                    label: 'Precio Promedio (USD)',
+                    data: avgPrices,
+                    backgroundColor: '#4a6fa5'
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+
+        // --- 3 & 4 Year Stats (Depreciation & Usage) ---
+        // Group by Year
+        const years = [...new Set(yearStats.map(d => d._id.year))].sort((a,b) => a - b);
+
+        const yearPrices = years.map(y => {
+            const entries = yearStats.filter(d => d._id.year === y);
+            let totalVal = 0;
+            let count = 0;
+            entries.forEach(e => {
+                let val = normalizePrice(e.avg_price, e._id.currency);
+                if (val !== null) {
+                    totalVal += val * e.count; // Weighted average
+                    count += e.count;
+                } else if (exchangeRate === 0 && e._id.currency === 'USD') {
+                    totalVal += e.avg_price * e.count;
+                    count += e.count;
+                }
+            });
+            return count > 0 ? (totalVal / count) : null;
+        });
+
+        const yearKms = years.map(y => {
+            const entries = yearStats.filter(d => d._id.year === y);
+            let totalKm = 0;
+            let count = 0;
+            entries.forEach(e => {
+                totalKm += e.avg_km * e.count;
+                count += e.count;
+            });
+            return count > 0 ? (totalKm / count) : 0;
+        });
+
+        new Chart(document.getElementById('depreciationChart'), {
+            type: 'line',
+            data: {
+                labels: years,
+                datasets: [{
+                    label: 'Precio Promedio (USD)',
+                    data: yearPrices,
+                    borderColor: '#ff6b6b',
+                    tension: 0.1
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+
+        new Chart(document.getElementById('usageChart'), {
+            type: 'bar',
+            data: {
+                labels: years,
+                datasets: [{
+                    label: 'Km Promedio',
+                    data: yearKms,
+                    backgroundColor: '#6bcb77'
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+
+    </script>
+    </body>
+    </html>
+    ''', inventory_stats=inventory_stats, price_stats=price_stats, year_stats=year_stats, exchange_rate=exchange_rate, exchange_rate_val=exchange_rate_val)
 
 @app.route('/download/<filename>')
 def download(filename):
