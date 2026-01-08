@@ -237,6 +237,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "flask" },
+    { name = "numpy" },
     { name = "pandas" },
     { name = "pymongo" },
     { name = "python-dotenv" },
@@ -247,6 +248,7 @@ dependencies = [
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.14.3" },
     { name = "flask", specifier = ">=3.1.2" },
+    { name = "numpy", specifier = ">=2.3.5" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pymongo", specifier = ">=4.15.5" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
