@@ -29,6 +29,8 @@ class WebLogger:
     def __init__(self):
         self.logs = []
     def write(self, message):
+        if isinstance(message, bytes):
+            message = message.decode('utf-8', errors='replace')
         if message.strip():
             self.logs.append(message.strip())
     def flush(self):
