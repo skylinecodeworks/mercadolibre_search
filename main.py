@@ -202,6 +202,12 @@ def scrape_mercado_libre(search_term):
             items = soup.find_all('div', class_='ui-search-result__wrapper')
             web_logger.write(f"DEBUG: Found {len(items)} items with class 'ui-search-result__wrapper'")
 
+            # If no items found with old class, try new poly-card class
+            if not items:
+                web_logger.write("DEBUG: Trying fallback selector 'div.poly-card'...")
+                items = soup.find_all('div', class_=lambda x: x and 'poly-card' in x and 'andes-card' in x)
+                web_logger.write(f"DEBUG: Found {len(items)} items with class 'poly-card'")
+
             if not items:
                 web_logger.write("No items found in page")
                 # Debugging info when no items found
@@ -211,11 +217,6 @@ def scrape_mercado_libre(search_term):
                     web_logger.write(str(body)[:500])
                 else:
                     web_logger.write("No body tag found.")
-
-                # Check for other potential classes to hint at structure changes
-                web_logger.write("DEBUG: Checking for 'poly-card' class presence...")
-                poly_cards = soup.find_all(class_=lambda x: x and 'poly-card' in x)
-                web_logger.write(f"DEBUG: Found {len(poly_cards)} elements with 'poly-card' in class")
                 break
 
             for item in items:
