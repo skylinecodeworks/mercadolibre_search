@@ -35,6 +35,8 @@ class WebLogger:
         pass
 
 web_logger = WebLogger()
+# Redirect stdout to web_logger to capture legacy print statements or 3rd party logs,
+# although we prefer using web_logger.write() explicitly for application logging.
 sys.stdout = web_logger
 
 mongo_user = os.getenv("MONGO_USER")
@@ -182,22 +184,40 @@ def scrape_mercado_libre(search_term):
 
     while True:
         url = f"{base_url}{search_term.replace(' ', '-')}_Desde_{(page - 1) * 48 + 1}"
-        print(f"Scraping page {page}: {url}")
+        web_logger.write(f"Scraping page {page}: {url}")
         try:
             response = session.get(url, timeout=10)
+            web_logger.write(f"DEBUG: Status Code: {response.status_code}, Content Length: {len(response.text)}")
+
             if response.status_code == 404:
-                print(f"No more pages available (404 error)")
+                web_logger.write(f"No more pages available (404 error)")
                 break
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
             no_results = soup.find('p', class_='ui-search-sidebar__no-results-message')
             if no_results:
-                print(f"No results message detected: {no_results.text.strip()}")
+                web_logger.write(f"No results message detected: {no_results.text.strip()}")
                 break
+
             items = soup.find_all('div', class_='ui-search-result__wrapper')
+            web_logger.write(f"DEBUG: Found {len(items)} items with class 'ui-search-result__wrapper'")
+
             if not items:
-                print("No items found in page")
+                web_logger.write("No items found in page")
+                # Debugging info when no items found
+                web_logger.write("DEBUG: Dumping first 500 chars of HTML body for inspection:")
+                body = soup.find('body')
+                if body:
+                    web_logger.write(str(body)[:500])
+                else:
+                    web_logger.write("No body tag found.")
+
+                # Check for other potential classes to hint at structure changes
+                web_logger.write("DEBUG: Checking for 'poly-card' class presence...")
+                poly_cards = soup.find_all(class_=lambda x: x and 'poly-card' in x)
+                web_logger.write(f"DEBUG: Found {len(poly_cards)} elements with 'poly-card' in class")
                 break
+
             for item in items:
                 try:
                     title_elem = item.find('a', class_='poly-component__title')
@@ -205,6 +225,7 @@ def scrape_mercado_libre(search_term):
                     link = title_elem.get('href', '#') if title_elem else '#'
                     unique_id = extract_unique_id(link)
                     if not unique_id:
+                        web_logger.write(f"DEBUG: Could not extract unique ID from link: {link[:50]}...")
                         continue
                     picture_url = extract_picture_url(item)
                     price_elem = item.find('span', class_='andes-money-amount__fraction')
@@ -243,14 +264,14 @@ def scrape_mercado_libre(search_term):
                         'link': link,
                         'search_term': search_term
                     })
-                    print(f"Added item: {title[:50]}... (ID: {unique_id})")
+                    web_logger.write(f"Added item: {title[:50]}... (ID: {unique_id})")
                 except Exception as e:
-                    print(f"Error processing item: {e}")
+                    web_logger.write(f"Error processing item: {e}")
                     continue
             page += 1
             time.sleep(2)
         except Exception as e:
-            print(f"Error scraping page {page}: {e}")
+            web_logger.write(f"Error scraping page {page}: {e}")
             break
     df = pd.DataFrame(all_items)
     if not df.empty:
@@ -464,8 +485,22 @@ def index():
                 </div>
             </div>
 
-            <!-- Filter Card -->
-            <div class="card shadow-sm mb-4">
+            <!-- Tabs Navigation -->
+            <ul class="nav nav-tabs mb-3" id="myTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="results-tab" data-bs-toggle="tab" data-bs-target="#results-tab-pane" type="button" role="tab" aria-controls="results-tab-pane" aria-selected="true">Resultados</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs-tab-pane" type="button" role="tab" aria-controls="logs-tab-pane" aria-selected="false">Logs del Scraper</button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="myTabContent">
+                <!-- Results Pane -->
+                <div class="tab-pane fade show active" id="results-tab-pane" role="tabpanel" aria-labelledby="results-tab" tabindex="0">
+
+                    <!-- Filter Card -->
+                    <div class="card shadow-sm mb-4">
                 <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
                     <h5 class="mb-0 h6 fw-bold text-primary">Filtros de resultados</h5>
                     <button type="button" id="resetFilters" class="btn btn-outline-danger btn-sm" style="font-size: 0.8em; padding: 2px 8px;">Reset</button>
@@ -574,6 +609,23 @@ def index():
                     </table>
                 </div>
             </div>
+                </div> <!-- End Results Pane -->
+
+                <!-- Logs Pane -->
+                <div class="tab-pane fade" id="logs-tab-pane" role="tabpanel" aria-labelledby="logs-tab" tabindex="0">
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-dark text-white py-2">
+                            <h5 class="mb-0 h6 font-monospace">Logs Técnicos</h5>
+                        </div>
+                        <div class="card-body bg-dark text-light p-0">
+                            <div style="max-height: 600px; overflow-y: auto; padding: 1rem;">
+                                <pre class="m-0" style="font-size: 0.85rem; white-space: pre-wrap;">{% for log in logs %}{{ log }}
+{% endfor %}</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div> <!-- End Tab Content -->
         </div>
 
         <!-- Modal Bootstrap para gráfico -->
