@@ -182,8 +182,10 @@ def scrape_mercado_libre(search_term):
     page = 1
     session = get_session()
 
+    # Initial URL for the first page
+    url = f"{base_url}{search_term.replace(' ', '-')}_Desde_1"
+
     while True:
-        url = f"{base_url}{search_term.replace(' ', '-')}_Desde_{(page - 1) * 48 + 1}"
         web_logger.write(f"Scraping page {page}: {url}")
         try:
             response = session.get(url, timeout=10)
@@ -269,7 +271,20 @@ def scrape_mercado_libre(search_term):
                 except Exception as e:
                     web_logger.write(f"Error processing item: {e}")
                     continue
-            page += 1
+            # Pagination Logic
+            next_btn = soup.find('li', class_='andes-pagination__button--next')
+            next_link = next_btn.find('a') if next_btn else None
+            next_url = next_link.get('href') if next_link else None
+
+            if next_url and next_url.startswith('http'):
+                url = next_url
+                web_logger.write(f"DEBUG: Found next page link: {url}")
+                page += 1
+            else:
+                web_logger.write("DEBUG: No valid 'Next' link found in pagination. Trying calculated URL...")
+                page += 1
+                url = f"{base_url}{search_term.replace(' ', '-')}_Desde_{(page - 1) * 48 + 1}"
+
             time.sleep(2)
         except Exception as e:
             web_logger.write(f"Error scraping page {page}: {e}")
