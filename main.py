@@ -12,7 +12,7 @@ from pymongo import MongoClient
 from datetime import datetime
 import re
 import os
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
@@ -107,6 +107,38 @@ except Exception as e:
 
 mongo_db = mongo_client[mongo_db_name]
 cars_collection = mongo_db[os.getenv("MONGO_COLLECTION", "cars")]
+
+def update_url_pagination(current_url, page_number, items_per_page=48):
+    """
+    Updates the '_Desde_' parameter in the URL for pagination.
+    If '_Desde_' is missing, it appends it.
+    """
+    offset = (page_number - 1) * items_per_page + 1
+
+    parsed = urlparse(current_url)
+    path = parsed.path
+    query = parsed.query
+
+    # Check if _Desde_ exists in the path
+    if "_Desde_" in path:
+        # Replace existing offset
+        new_path = re.sub(r"_Desde_\d+", f"_Desde_{offset}", path)
+    else:
+        if path.endswith('/'):
+            path = path[:-1]
+        new_path = f"{path}_Desde_{offset}"
+
+    # Ensure _NoIndex_True is present if not already (often needed for deep pagination)
+    if "_NoIndex_True" not in new_path:
+        new_path = f"{new_path}_NoIndex_True"
+
+    # Reconstruct URL
+    if query:
+        new_url = f"{parsed.scheme}://{parsed.netloc}{new_path}?{query}"
+    else:
+        new_url = f"{parsed.scheme}://{parsed.netloc}{new_path}"
+
+    return new_url
 
 def extract_unique_id(url):
     match = re.search(r"MLA-(\d+)", url or "")
@@ -274,6 +306,11 @@ def scrape_mercado_libre(search_term):
             # Pagination Logic
             next_btn = soup.find('li', class_='andes-pagination__button--next')
             next_link = next_btn.find('a') if next_btn else None
+
+            # Fallback for next link if class structure changed
+            if not next_link:
+                 next_link = soup.find('a', title='Siguiente')
+
             next_url = next_link.get('href') if next_link else None
 
             if next_url and next_url.startswith('http'):
@@ -283,7 +320,8 @@ def scrape_mercado_libre(search_term):
             else:
                 web_logger.write("DEBUG: No valid 'Next' link found in pagination. Trying calculated URL...")
                 page += 1
-                url = f"{base_url}{search_term.replace(' ', '-')}_Desde_{(page - 1) * 48 + 1}"
+                # Use current response.url to preserve filters/category
+                url = update_url_pagination(response.url, page)
 
             time.sleep(2)
         except Exception as e:
