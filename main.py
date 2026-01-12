@@ -545,6 +545,9 @@ def index():
                     <button class="nav-link active" id="results-tab" data-bs-toggle="tab" data-bs-target="#results-tab-pane" type="button" role="tab" aria-controls="results-tab-pane" aria-selected="true">Resultados</button>
                 </li>
                 <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="charts-tab" data-bs-toggle="tab" data-bs-target="#charts-tab-pane" type="button" role="tab" aria-controls="charts-tab-pane" aria-selected="false">Gráficos</button>
+                </li>
+                <li class="nav-item" role="presentation">
                     <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs-tab-pane" type="button" role="tab" aria-controls="logs-tab-pane" aria-selected="false">Logs del Scraper</button>
                 </li>
             </ul>
@@ -665,6 +668,72 @@ def index():
             </div>
                 </div> <!-- End Results Pane -->
 
+                <!-- Charts Pane -->
+                <div class="tab-pane fade" id="charts-tab-pane" role="tabpanel" aria-labelledby="charts-tab" tabindex="0">
+                    <div class="container-fluid p-0">
+                        <div class="row g-3 mb-4">
+                            <!-- Scatter: Price vs Year -->
+                            <div class="col-12 col-lg-8">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white py-2"><h6 class="m-0 fw-bold text-primary">Precio vs Año</h6></div>
+                                    <div class="card-body">
+                                        <canvas id="scatterPriceYearChart" style="max-height: 300px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Evolution -->
+                            <div class="col-12 col-lg-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white py-2"><h6 class="m-0 fw-bold text-primary">Evolución de Precios</h6></div>
+                                    <div class="card-body">
+                                        <canvas id="evolutionPieChart" style="max-height: 300px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-4">
+                            <!-- Price Distribution -->
+                            <div class="col-12 col-md-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white py-2"><h6 class="m-0 fw-bold text-primary">Distribución de Precios</h6></div>
+                                    <div class="card-body">
+                                        <canvas id="priceDistChart" style="max-height: 250px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Year Distribution -->
+                            <div class="col-12 col-md-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white py-2"><h6 class="m-0 fw-bold text-primary">Distribución por Año</h6></div>
+                                    <div class="card-body">
+                                        <canvas id="yearDistChart" style="max-height: 250px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Km Distribution -->
+                            <div class="col-12 col-md-4">
+                                <div class="card shadow-sm h-100">
+                                    <div class="card-header bg-white py-2"><h6 class="m-0 fw-bold text-primary">Distribución por Kilometraje</h6></div>
+                                    <div class="card-body">
+                                        <canvas id="kmDistChart" style="max-height: 250px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-3">
+                             <!-- Location -->
+                            <div class="col-12">
+                                <div class="card shadow-sm">
+                                    <div class="card-header bg-white py-2"><h6 class="m-0 fw-bold text-primary">Top Ubicaciones</h6></div>
+                                    <div class="card-body">
+                                        <canvas id="locationBarChart" style="max-height: 300px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Logs Pane -->
                 <div class="tab-pane fade" id="logs-tab-pane" role="tabpanel" aria-labelledby="logs-tab" tabindex="0">
                     <div class="card shadow-sm mb-4">
@@ -783,6 +852,172 @@ def index():
                 paging: false,
                 info: false,
                 language: {search: "Buscar:", zeroRecords: "No se encontraron registros"}
+            });
+
+            // --- Chart Instances ---
+            let charts = {};
+
+            function initCharts() {
+                // Common options
+                const commonOptions = { responsive: true, maintainAspectRatio: false };
+
+                // Scatter Price vs Year
+                const ctxScatter = document.getElementById('scatterPriceYearChart').getContext('2d');
+                charts.scatter = new Chart(ctxScatter, {
+                    type: 'scatter',
+                    data: { datasets: [{ label: 'Precio vs Año', data: [], backgroundColor: 'rgba(54, 162, 235, 0.6)' }] },
+                    options: { ...commonOptions, scales: { x: { title: { display: true, text: 'Año' } }, y: { title: { display: true, text: 'Precio' } } } }
+                });
+
+                // Evolution Pie
+                const ctxPie = document.getElementById('evolutionPieChart').getContext('2d');
+                charts.pie = new Chart(ctxPie, {
+                    type: 'doughnut',
+                    data: { labels: ['Subió', 'Bajó', 'Igual'], datasets: [{ data: [0,0,0], backgroundColor: ['#ff6384', '#36a2eb', '#ffce56'] }] },
+                    options: commonOptions
+                });
+
+                // Price Dist
+                const ctxPrice = document.getElementById('priceDistChart').getContext('2d');
+                charts.price = new Chart(ctxPrice, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ label: 'Frecuencia', data: [], backgroundColor: 'rgba(75, 192, 192, 0.6)' }] },
+                    options: { ...commonOptions, scales: { x: { ticks: { maxTicksLimit: 10 } } } }
+                });
+
+                // Year Dist
+                const ctxYear = document.getElementById('yearDistChart').getContext('2d');
+                charts.year = new Chart(ctxYear, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ label: 'Cantidad', data: [], backgroundColor: 'rgba(153, 102, 255, 0.6)' }] },
+                    options: commonOptions
+                });
+
+                // Km Dist
+                const ctxKm = document.getElementById('kmDistChart').getContext('2d');
+                charts.km = new Chart(ctxKm, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ label: 'Frecuencia', data: [], backgroundColor: 'rgba(255, 159, 64, 0.6)' }] },
+                    options: { ...commonOptions, scales: { x: { ticks: { maxTicksLimit: 10 } } } }
+                });
+
+                // Location Bar
+                const ctxLoc = document.getElementById('locationBarChart').getContext('2d');
+                charts.location = new Chart(ctxLoc, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ label: 'Cantidad', data: [], backgroundColor: 'rgba(255, 99, 132, 0.6)' }] },
+                    options: { ...commonOptions, indexAxis: 'y' }
+                });
+            }
+
+            function updateDashboard() {
+                const rows = table.rows({ search: 'applied' }).nodes();
+                const $rows = $(rows);
+
+                const prices = [];
+                const years = [];
+                const kms = [];
+                const locations = [];
+                const evolutions = { up: 0, down: 0, equal: 0 };
+                const scatterData = [];
+
+                $rows.each(function() {
+                    const $row = $(this);
+                    // Col 2: Price
+                    const price = parseFloat($row.find('td:eq(2)').attr('data-order')) || 0;
+                    // Col 4: Year
+                    const year = parseInt($row.find('td:eq(4)').attr('data-order')) || 0;
+                    // Col 5: Km
+                    const km = parseFloat($row.find('td:eq(5)').attr('data-order')) || 0;
+                    // Col 6: Location
+                    const loc = $row.find('td:eq(6)').text().trim();
+                    // Evolution (TR attribute)
+                    const evol = $row.attr('data-evolution');
+
+                    if(price > 0) prices.push(price);
+                    if(year > 0) years.push(year);
+                    kms.push(km);
+                    if(loc) locations.push(loc);
+
+                    if (evol === '↑') evolutions.up++;
+                    else if (evol === '↓') evolutions.down++;
+                    else evolutions.equal++;
+
+                    if (price > 0 && year > 0) {
+                        scatterData.push({ x: year, y: price });
+                    }
+                });
+
+                // Update Scatter
+                charts.scatter.data.datasets[0].data = scatterData;
+                charts.scatter.update();
+
+                // Update Evolution Pie
+                charts.pie.data.datasets[0].data = [evolutions.up, evolutions.down, evolutions.equal];
+                charts.pie.update();
+
+                // Helper for Histogram
+                function createHistogram(dataArray, numBins) {
+                    if (dataArray.length === 0) return { labels: [], counts: [] };
+                    const min = Math.min(...dataArray);
+                    const max = Math.max(...dataArray);
+                    if (min === max) return { labels: [min], counts: [dataArray.length] };
+
+                    const step = (max - min) / numBins;
+                    const bins = new Array(numBins).fill(0);
+                    const labels = [];
+
+                    for(let i=0; i<numBins; i++) {
+                        const start = min + (i * step);
+                        const end = start + step;
+                        labels.push(`${Math.round(start)} - ${Math.round(end)}`);
+                    }
+
+                    dataArray.forEach(val => {
+                        let idx = Math.floor((val - min) / step);
+                        if (idx >= numBins) idx = numBins - 1;
+                        bins[idx]++;
+                    });
+
+                    return { labels, counts: bins };
+                }
+
+                // Update Price Dist
+                const priceHist = createHistogram(prices, 15);
+                charts.price.data.labels = priceHist.labels;
+                charts.price.data.datasets[0].data = priceHist.counts;
+                charts.price.update();
+
+                // Update Year Dist
+                const yearCounts = {};
+                years.forEach(y => yearCounts[y] = (yearCounts[y] || 0) + 1);
+                const sortedYears = Object.keys(yearCounts).sort();
+                charts.year.data.labels = sortedYears;
+                charts.year.data.datasets[0].data = sortedYears.map(y => yearCounts[y]);
+                charts.year.update();
+
+                // Update Km Dist
+                const kmHist = createHistogram(kms, 15);
+                charts.km.data.labels = kmHist.labels;
+                charts.km.data.datasets[0].data = kmHist.counts;
+                charts.km.update();
+
+                // Update Location (Top 10)
+                const locCounts = {};
+                locations.forEach(l => locCounts[l] = (locCounts[l] || 0) + 1);
+                const sortedLocs = Object.entries(locCounts).sort((a,b) => b[1] - a[1]).slice(0, 10);
+                charts.location.data.labels = sortedLocs.map(i => i[0]);
+                charts.location.data.datasets[0].data = sortedLocs.map(i => i[1]);
+                charts.location.update();
+            }
+
+            // Init and Draw
+            initCharts();
+            updateDashboard();
+
+            // Hook into draw event
+            table.on('draw', function () {
+                updateDashboard();
             });
 
             // Event listeners for inputs to redraw table and save to localStorage
