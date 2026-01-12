@@ -279,8 +279,18 @@ def scrape_mercado_libre(search_term):
                     details = item.find_all('li', class_='poly-attributes_list__item')
                     year = details[0].text.strip() if len(details) > 0 and details[0].text else 'N/A'
                     km = details[1].text.strip() if len(details) > 1 and details[1].text else 'N/A'
-                    location_elem = item.find('span', class_='poly-component__location')
+                    # Try multiple selectors for location
+                    location_elem = item.find(class_='poly-component__location')
+                    if not location_elem:
+                        location_elem = item.find(class_='ui-search-item__location')
+                    if not location_elem:
+                        location_elem = item.find(class_='ui-search-result__location')
+
                     location = location_elem.text.strip() if location_elem and location_elem.text else 'N/A'
+
+                    # Fallback: check if location is in attributes list (3rd item)
+                    if location == 'N/A' and len(details) > 2:
+                         location = details[2].text.strip()
 
                     year_num = int(year) if year != 'N/A' else 0
                     km_num = int(km.replace('Km', '').replace('.', '').strip()) if km != 'N/A' else 0
